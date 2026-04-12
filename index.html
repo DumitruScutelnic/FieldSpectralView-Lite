@@ -22,6 +22,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body class="bg-museum-900 text-white overflow-hidden w-screen h-screen flex flex-col" style="font-family:'Inter',sans-serif;">
 
@@ -57,9 +58,15 @@
     <!-- ============ ARCHIVE VIEW ============ -->
     <div id="view-archive" class="flex-1 overflow-y-auto p-8">
         <div class="max-w-5xl mx-auto">
-            <div class="mb-8 border-b border-gray-800 pb-4">
-                <h2 class="text-3xl text-white mb-2" style="font-family:'Playfair Display',serif;">Digital Archive</h2>
-                <p class="text-gray-400 text-sm">Select an existing case study to view diagnostic data.</p>
+            <div class="mb-8 border-b border-gray-800 pb-4 flex items-end justify-between gap-4">
+                <div>
+                    <h2 class="text-3xl text-white mb-2" style="font-family:'Playfair Display',serif;">Digital Archive</h2>
+                    <p class="text-gray-400 text-sm">Select an existing case study or start a free browser session.</p>
+                </div>
+                <button id="btn-new-session" class="flex-shrink-0 flex items-center gap-2 bg-museum-accent text-black px-4 py-2 rounded font-bold text-xs uppercase tracking-wider hover:bg-white transition-colors mb-1">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    New Session
+                </button>
             </div>
             <div id="archive-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <!-- Populated by JS -->
@@ -229,8 +236,18 @@
                     </div>
 
                     <!-- EXPORT TAB -->
-                    <div id="tab-export" class="tab-content space-y-4 hidden">
+                    <div id="tab-export" class="tab-content space-y-3 hidden">
                         <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Download & Export</h3>
+
+                        <!-- Session ZIP (shown only in session mode) -->
+                        <button id="session-zip-btn" class="hidden w-full py-3 bg-emerald-700 text-white font-bold rounded text-xs uppercase tracking-wider hover:bg-emerald-600 transition-colors border border-emerald-600 flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                            Download Session ZIP
+                        </button>
+                        <p id="session-zip-info" class="hidden text-[10px] text-emerald-600/70 italic">Includes all uploaded images, VI results, annotations and metadata in one folder.</p>
+                        <div id="session-export-sep" class="hidden border-t border-gray-700 my-1"></div>
+
+                        <!-- Standard exports (always visible) -->
                         <button id="export-json-btn" class="w-full py-3 bg-museum-accent text-black font-bold rounded text-xs uppercase tracking-wider hover:bg-white transition-colors flex items-center justify-center gap-2">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                             Export Metadata (.json)
@@ -349,6 +366,106 @@
             </div>
         </div>
     </main>
+
+    <!-- ============ SESSION MODAL ============ -->
+    <div id="session-modal" class="fixed inset-0 z-[200] hidden" role="dialog" aria-modal="true">
+        <div class="absolute inset-0 bg-black/85 backdrop-blur-sm" id="session-modal-bg"></div>
+        <div class="absolute inset-0 flex items-start justify-center p-4 overflow-y-auto">
+            <div class="relative w-full max-w-2xl bg-museum-800 border border-gray-700 rounded-xl shadow-2xl my-8">
+
+                <!-- Header -->
+                <div class="p-6 border-b border-gray-700 flex items-start justify-between">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <div class="w-6 h-6 bg-museum-accent rounded-sm flex items-center justify-center">
+                                <svg class="w-3.5 h-3.5 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                            </div>
+                            <h2 class="text-lg font-bold text-white" style="font-family:'Playfair Display',serif;">New Analysis Session</h2>
+                        </div>
+                        <p class="text-[11px] text-gray-400">Processing happens entirely in your browser — no server, no account, no data uploaded.</p>
+                    </div>
+                    <button id="session-close-btn" class="text-gray-500 hover:text-white ml-4 flex-shrink-0 p-1">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <!-- Body -->
+                <div class="p-6 space-y-4 max-h-[65vh] overflow-y-auto custom-scrollbar">
+
+                    <!-- Metadata row 1 -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] text-gray-400 uppercase font-bold mb-1">Project Title *</label>
+                            <input id="session-title" type="text" placeholder="My Multispectral Analysis"
+                                class="w-full bg-[#1a1a1a] border border-gray-700 text-gray-200 text-sm p-2 rounded focus:border-museum-accent focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-gray-400 uppercase font-bold mb-1">Author / Group</label>
+                            <input id="session-author" type="text" placeholder="Student name"
+                                class="w-full bg-[#1a1a1a] border border-gray-700 text-gray-200 text-sm p-2 rounded focus:border-museum-accent focus:outline-none">
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div>
+                        <label class="block text-[10px] text-gray-400 uppercase font-bold mb-1">Description</label>
+                        <textarea id="session-desc" placeholder="Describe the acquisition site and objectives..." rows="2"
+                            class="w-full bg-[#1a1a1a] border border-gray-700 text-gray-200 text-sm p-2 rounded focus:border-museum-accent focus:outline-none resize-none"></textarea>
+                    </div>
+
+                    <!-- Metadata row 2 -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] text-gray-400 uppercase font-bold mb-1">Acquisition Date</label>
+                            <input id="session-date" type="date"
+                                class="w-full bg-[#1a1a1a] border border-gray-700 text-gray-200 text-sm p-2 rounded focus:border-museum-accent focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-gray-400 uppercase font-bold mb-1">Location / Site</label>
+                            <input id="session-location" type="text" placeholder="GPS coords or site name"
+                                class="w-full bg-[#1a1a1a] border border-gray-700 text-gray-200 text-sm p-2 rounded focus:border-museum-accent focus:outline-none">
+                        </div>
+                    </div>
+
+                    <!-- Drop zone -->
+                    <div>
+                        <label class="block text-[10px] text-gray-400 uppercase font-bold mb-2">Multispectral Images *</label>
+                        <div id="session-drop-zone"
+                            class="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center cursor-pointer hover:border-museum-accent transition-colors relative group">
+                            <input type="file" id="session-files" multiple accept="image/*,.tif,.tiff"
+                                class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                            <svg class="w-8 h-8 text-gray-500 group-hover:text-museum-accent mx-auto mb-2 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            <p class="text-sm text-gray-400 font-medium group-hover:text-gray-200 transition-colors">Drop images here or click to select</p>
+                            <p class="text-xs text-gray-500 mt-1">PNG · JPG · TIFF — one file per spectral band</p>
+                        </div>
+                    </div>
+
+                    <!-- Band hint -->
+                    <div class="bg-[#1a1a1a] border border-gray-700 rounded p-3">
+                        <p class="text-[10px] text-gray-400 font-bold uppercase mb-1">Band auto-detection</p>
+                        <p class="text-[10px] text-gray-500 leading-relaxed">Name your files (or set the label below) with the wavelength: <span class="text-museum-accent font-mono">685nm</span>, <span class="text-museum-accent font-mono">740nm</span>, <span class="text-museum-accent font-mono">NIR</span>, <span class="text-museum-accent font-mono">RGB</span>, etc. The system will detect the spectral band automatically and enable applicable vegetation indices.</p>
+                    </div>
+
+                    <!-- File list (populated by JS) -->
+                    <div id="session-file-list"></div>
+
+                </div>
+
+                <!-- Footer -->
+                <div class="p-4 border-t border-gray-700 flex items-center justify-between">
+                    <button id="session-cancel-btn" class="text-xs text-gray-400 hover:text-white uppercase font-bold tracking-wider px-4 py-2 transition-colors">Cancel</button>
+                    <button id="session-create-btn"
+                        class="flex items-center gap-2 bg-museum-accent text-black px-6 py-2.5 rounded font-bold text-sm uppercase tracking-wider hover:bg-white transition-colors">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        Create Session
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
 
     <script src="js/app.js"></script>
 </body>

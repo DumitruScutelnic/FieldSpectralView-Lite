@@ -33,6 +33,17 @@
     const PLOT_COLORS = ['#047842', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
 
     // ===========================
+    //  SESSION STATE (browser-only, no server)
+    // ===========================
+    const session = {
+        isActive: false,
+        id: null,
+        layerFiles: [],  // { file, objectUrl, filename, description, band }
+        viBlobs: {}      // { viId: { blob, filename, objectUrl } }
+    };
+    let _pendingFiles = []; // files staged in the session modal before creation
+
+    // ===========================
     //  VEGETATION INDICES (VIs)
     // ===========================
     const VI_DEFINITIONS = [
@@ -322,15 +333,33 @@
         const index = await loadDatasetIndex();
         const grid = $('#archive-grid');
         grid.innerHTML = '';
-        if (index.datasets.length === 0) {
-            grid.innerHTML = `<div class="text-gray-500 text-sm col-span-3 bg-[#1a1a1a] p-6 rounded-lg border border-gray-800">
-                <p class="font-bold text-gray-300 mb-2">No datasets found</p>
-                <p class="mb-3">To load projects, create a <code class="bg-gray-800 px-1 rounded">datasets/manifest.json</code> file:</p>
-                <pre class="bg-black p-3 rounded text-xs text-emerald-400 mb-3">{ "projects": ["proj_45cb298f", "proj_7a9d8717"] }</pre>
-                <p class="text-[11px]">Then copy your backend project folders into <code class="bg-gray-800 px-1 rounded">datasets/</code>.</p>
+
+        // ---- "New Session" card (always first) ----
+        const sessionCard = document.createElement('div');
+        sessionCard.className = 'archive-card bg-[#1a1a1a] border-2 border-dashed border-gray-600 rounded-lg overflow-hidden cursor-pointer group hover:border-museum-accent transition-all flex flex-col';
+        sessionCard.innerHTML = `
+            <div class="flex-1 flex flex-col items-center justify-center gap-3 py-10">
+                <div class="w-14 h-14 rounded-full border-2 border-dashed border-gray-600 group-hover:border-museum-accent flex items-center justify-center transition-colors">
+                    <svg class="w-7 h-7 text-gray-500 group-hover:text-museum-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                </div>
+                <span class="text-sm font-bold text-gray-400 group-hover:text-museum-accent uppercase tracking-wider transition-colors">New Session</span>
+            </div>
+            <div class="p-4 border-t border-gray-800">
+                <p class="text-[10px] text-gray-500 text-center leading-relaxed">Upload your images · process locally · download results</p>
             </div>`;
+        sessionCard.addEventListener('click', () => showSessionModal());
+        grid.appendChild(sessionCard);
+
+        if (index.datasets.length === 0) {
+            const hint = document.createElement('div');
+            hint.className = 'text-gray-500 text-sm col-span-2 bg-[#1a1a1a] p-6 rounded-lg border border-gray-800';
+            hint.innerHTML = `<p class="font-bold text-gray-300 mb-2">No archived datasets found</p>
+                <p class="mb-3 text-[11px]">Copy project folders into <code class="bg-gray-800 px-1 rounded">datasets/</code> and add their IDs to <code class="bg-gray-800 px-1 rounded">datasets/manifest.json</code>.</p>
+                <p class="text-[11px] text-museum-accent">→ Use "New Session" above to start a free local processing session.</p>`;
+            grid.appendChild(hint);
             return;
         }
+
         index.datasets.forEach(ds => {
             // Build thumbnail URL: prefer vis.jpg, fallback to first layer file
             const thumbSrc = ds.thumbnail
@@ -428,6 +457,9 @@
 
         // VIs Panel
         renderVIPanel();
+
+        // Session-specific UI
+        updateSessionExportUI();
     }
 
     function setSidebarTab(tab) {
@@ -492,6 +524,8 @@
             return ''; // VI uses the overlay canvas instead of img src
         }
         if (!ds.layers[idx]) return '';
+        // Session mode: serve images from in-memory ObjectURLs
+        if (ds._isSession) return ds.layers[idx]._objectUrl || '';
         return `datasets/${state.datasetId}/${ds.layers[idx].filename}`;
     }
     function getLayerLabel(idx) {
@@ -983,7 +1017,13 @@
 
             for (const fname of neededFiles) {
                 const img = new Image();
-                img.src = `datasets/${state.datasetId}/${fname}`;
+                // Session: serve from ObjectURL; static: serve from datasets path
+                if (ds._isSession) {
+                    img.src = session.layerFiles.find(lf => lf.filename === fname)?.objectUrl || '';
+                } else {
+                    img.crossOrigin = 'anonymous';
+                    img.src = `datasets/${state.datasetId}/${fname}`;
+                }
                 await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
                 
                 const cvs = document.createElement('canvas');
@@ -1055,6 +1095,16 @@
             }
 
             resultCtx.putImageData(resultData, 0, 0);
+
+            // Capture VI output as blob for session ZIP download
+            if (ds._isSession) {
+                resultCvs.toBlob(viBlob => {
+                    if (!viBlob) return;
+                    if (session.viBlobs[vi.id]?.objectUrl) URL.revokeObjectURL(session.viBlobs[vi.id].objectUrl);
+                    const viFilename = `vi_${vi.id}_${session.id}.png`;
+                    session.viBlobs[vi.id] = { blob: viBlob, filename: viFilename, objectUrl: URL.createObjectURL(viBlob) };
+                }, 'image/png');
+            }
 
             // 3. Update State & UI
             state.viActive = vi;
@@ -1140,6 +1190,262 @@
     }
 
     // ===========================
+    //  SESSION — MODAL & CREATION
+    // ===========================
+
+    function showSessionModal() {
+        // Reset pending files on each open
+        _pendingFiles = [];
+        $('#session-file-list').innerHTML = '';
+        $('#session-title').value = '';
+        $('#session-author').value = '';
+        $('#session-desc').value = '';
+        $('#session-date').value = new Date().toISOString().split('T')[0];
+        $('#session-location').value = '';
+        $('#session-files').value = '';
+        $('#session-modal').classList.remove('hidden');
+    }
+
+    function hideSessionModal() {
+        // Revoke any ObjectURLs created for previews that weren't committed
+        if (!session.isActive) {
+            _pendingFiles.forEach(pf => URL.revokeObjectURL(pf.objectUrl));
+        }
+        _pendingFiles = [];
+        $('#session-modal').classList.add('hidden');
+    }
+
+    function renderSessionFileList() {
+        const container = $('#session-file-list');
+        if (!container) return;
+        container.innerHTML = '';
+        if (_pendingFiles.length === 0) return;
+
+        const header = document.createElement('div');
+        header.className = 'flex items-center justify-between mb-2';
+        header.innerHTML = `
+            <span class="text-[10px] uppercase text-gray-400 font-bold">${_pendingFiles.length} image(s) staged</span>
+            <button id="clear-all-files" class="text-[9px] text-red-500 hover:text-red-400 uppercase font-bold">Clear all</button>`;
+        header.querySelector('#clear-all-files').addEventListener('click', () => {
+            _pendingFiles.forEach(pf => URL.revokeObjectURL(pf.objectUrl));
+            _pendingFiles = [];
+            renderSessionFileList();
+        });
+        container.appendChild(header);
+
+        _pendingFiles.forEach((pf, i) => {
+            const band = descriptionToBand(pf.description);
+            const badgeClass = band
+                ? 'text-emerald-400 bg-emerald-900/30 border-emerald-700'
+                : 'text-gray-400 bg-gray-800 border-gray-700';
+
+            const row = document.createElement('div');
+            row.className = 'flex items-center gap-3 bg-[#1a1a1a] border border-gray-700 rounded p-2';
+            row.innerHTML = `
+                <div class="w-12 h-12 bg-black rounded overflow-hidden flex-shrink-0">
+                    <img src="${pf.objectUrl}" class="w-full h-full object-contain" alt="${pf.filename}">
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-[11px] text-gray-300 truncate font-medium">${pf.filename}</p>
+                    <div class="flex items-center gap-2 mt-1">
+                        <input type="text" value="${pf.description}" placeholder="e.g. 685nm, NIR, RGB"
+                            class="flex-1 bg-[#252525] border border-gray-700 text-gray-300 text-[11px] p-1 rounded focus:border-museum-accent focus:outline-none band-desc-input">
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 band-badge ${badgeClass}">${band || '?'}</span>
+                    </div>
+                </div>
+                <button class="text-gray-500 hover:text-red-400 flex-shrink-0 p-1 remove-file-btn">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>`;
+
+            // Band input live update
+            row.querySelector('.band-desc-input').addEventListener('input', e => {
+                _pendingFiles[i].description = e.target.value;
+                const newBand = descriptionToBand(e.target.value);
+                _pendingFiles[i].band = newBand;
+                const badge = row.querySelector('.band-badge');
+                badge.textContent = newBand || '?';
+                badge.className = `text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 band-badge ${
+                    newBand ? 'text-emerald-400 bg-emerald-900/30 border-emerald-700' : 'text-gray-400 bg-gray-800 border-gray-700'}`;
+            });
+
+            // Remove button
+            row.querySelector('.remove-file-btn').addEventListener('click', () => {
+                URL.revokeObjectURL(_pendingFiles[i].objectUrl);
+                _pendingFiles.splice(i, 1);
+                renderSessionFileList();
+            });
+
+            container.appendChild(row);
+        });
+    }
+
+    function onSessionFilesSelected(fileList) {
+        for (const file of fileList) {
+            if (_pendingFiles.some(pf => pf.filename === file.name)) continue; // skip duplicates
+            const objectUrl = URL.createObjectURL(file);
+            const nameNoExt = file.name.replace(/\.[^.]+$/, '');
+            const band = descriptionToBand(nameNoExt);
+            _pendingFiles.push({ file, objectUrl, filename: file.name, description: nameNoExt, band });
+        }
+        renderSessionFileList();
+    }
+
+    async function createSession() {
+        if (_pendingFiles.length === 0) {
+            alert('Select at least one image before creating the session.');
+            return;
+        }
+
+        const titleVal = $('#session-title').value.trim() || 'Untitled Session';
+        const authorVal = $('#session-author').value.trim() || 'Student';
+        const descVal = $('#session-desc').value.trim() || '';
+        const dateVal = $('#session-date').value || new Date().toISOString().split('T')[0];
+        const locVal = $('#session-location').value.trim() || '—';
+
+        // Commit pending files into session
+        session.isActive = true;
+        session.id = 'sess_' + Date.now().toString(36);
+        session.layerFiles = _pendingFiles.map(pf => ({ ...pf }));
+        session.viBlobs = {};
+        _pendingFiles = [];
+
+        const layers = session.layerFiles.map(lf => ({
+            filename: lf.filename,
+            description: lf.description,
+            band: lf.band || null,
+            _objectUrl: lf.objectUrl,
+            _isSession: true
+        }));
+
+        state.currentDataset = {
+            _isSession: true,
+            metadata: {
+                title: titleVal, author: authorVal, description: descVal,
+                date: dateVal, coordinates: locVal,
+                sensor: 'User Upload (Browser Session)',
+                year: dateVal.split('-')[0] || '—'
+            },
+            layers,
+            annotations: []
+        };
+        state.datasetId = session.id;
+        state.layer1Idx = 0;
+        state.layer2Idx = Math.min(1, layers.length - 1);
+        state.selectedAnnotationId = null;
+        state.transform = { scale: 1, x: 0, y: 0 };
+        state.sliderPos = 50;
+        state.plotVisibleIds = [];
+        state.viActive = null;
+
+        hideSessionModal();
+        showView('analysis');
+        renderSidebar();
+        setMode('compare');
+        applyTransform();
+        $('#compare-left').style.clipPath = 'inset(0 50% 0 0)';
+        $('#slider-handle').style.left = '50%';
+        renderAnnotations();
+        updateChart();
+    }
+
+    // ===========================
+    //  SESSION — UI HELPERS
+    // ===========================
+
+    function updateSessionExportUI() {
+        const isSession = !!(state.currentDataset?._isSession);
+        $('#session-zip-btn')?.classList.toggle('hidden', !isSession);
+        $('#session-zip-info')?.classList.toggle('hidden', !isSession);
+        $('#session-export-sep')?.classList.toggle('hidden', !isSession);
+    }
+
+    // ===========================
+    //  SESSION — ZIP DOWNLOAD
+    // ===========================
+
+    async function downloadSessionZip() {
+        const ds = state.currentDataset;
+        if (!ds || !ds._isSession) { exportJSON(); return; }
+        if (typeof JSZip === 'undefined') { alert('JSZip not loaded.'); return; }
+
+        const btn = $('#session-zip-btn');
+        const origText = btn?.innerHTML;
+        if (btn) { btn.textContent = 'Building ZIP…'; btn.disabled = true; }
+
+        try {
+            const zip = new JSZip();
+            const safeTitle = (ds.metadata.title || session.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const folder = zip.folder(safeTitle);
+
+            // 1. Original uploaded images
+            for (const lf of session.layerFiles) {
+                folder.file(lf.filename, lf.file);
+            }
+
+            // 2. VI result PNGs (captured from canvas during computation)
+            for (const [viId, viData] of Object.entries(session.viBlobs)) {
+                folder.file(viData.filename, viData.blob);
+            }
+
+            // 3. Project JSON (compatible with the web-app format)
+            const allLayers = [
+                ...ds.layers.map(l => ({
+                    filename: l.filename,
+                    description: l.description,
+                    band: l.band || null,
+                    type: 'User Upload'
+                })),
+                ...Object.entries(session.viBlobs).map(([viId, v]) => ({
+                    filename: v.filename,
+                    description: `VI_${viId.toUpperCase()}`,
+                    band: null,
+                    type: `VI_${viId}`
+                }))
+            ];
+
+            const projJSON = {
+                id: session.id,
+                metadata: { ...ds.metadata },
+                layers: allLayers,
+                annotations: ds.annotations,
+                timestamp: new Date().toISOString()
+            };
+            folder.file(`${session.id}.json`, JSON.stringify(projJSON, null, 2));
+
+            // 4. README for the student
+            const readmeLines = [
+                `# ${ds.metadata.title}`,
+                `Author: ${ds.metadata.author}`,
+                `Date: ${ds.metadata.date}`,
+                `Site: ${ds.metadata.coordinates}`,
+                '',
+                '## Contents',
+                ...allLayers.map(l => `- ${l.filename}  [${l.description}]`),
+                '',
+                '## Notes',
+                ds.metadata.description || '',
+                '',
+                'Generated by FieldSpectralView-Lite — https://github.com/DumitruScutelnic/FieldSpectralView-Lite'
+            ];
+            folder.file('README.md', readmeLines.join('\n'));
+
+            // Generate and download
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 4 }
+            });
+            downloadBlob(blob, `${safeTitle}.zip`);
+
+        } catch (err) {
+            console.error('ZIP error', err);
+            alert('Error building ZIP: ' + err.message);
+        } finally {
+            if (btn) { btn.innerHTML = origText; btn.disabled = false; }
+        }
+    }
+
+    // ===========================
     //  EVENT BINDINGS
     // ===========================
     function bindEvents() {
@@ -1148,6 +1454,36 @@
         $('#nav-analysis').addEventListener('click', () => { if (state.currentDataset) showView('analysis'); });
         $('#btn-back').addEventListener('click', () => showView('archive'));
         $('#logo-click').addEventListener('click', () => showView('archive'));
+
+        // --- Session modal ---
+        $('#btn-new-session')?.addEventListener('click', showSessionModal);
+        $('#session-close-btn')?.addEventListener('click', hideSessionModal);
+        $('#session-cancel-btn')?.addEventListener('click', hideSessionModal);
+        $('#session-modal-bg')?.addEventListener('click', hideSessionModal);
+        $('#session-create-btn')?.addEventListener('click', createSession);
+        $('#session-zip-btn')?.addEventListener('click', downloadSessionZip);
+
+        // File input (click to select)
+        $('#session-files')?.addEventListener('change', e => onSessionFilesSelected(e.target.files));
+
+        // Drag & drop on the drop zone
+        const dropZone = $('#session-drop-zone');
+        if (dropZone) {
+            dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-museum-accent', 'bg-museum-accent/5'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-museum-accent', 'bg-museum-accent/5'));
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.classList.remove('border-museum-accent', 'bg-museum-accent/5');
+                onSessionFilesSelected(e.dataTransfer.files);
+            });
+        }
+
+        // Keyboard: Escape closes session modal
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && !$('#session-modal').classList.contains('hidden')) {
+                hideSessionModal();
+            }
+        });
 
         // Sidebar tabs
         $$('.sidebar-tab').forEach(t => t.addEventListener('click', () => setSidebarTab(t.dataset.tab)));
