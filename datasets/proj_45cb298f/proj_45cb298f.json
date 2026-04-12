@@ -1,0 +1,61 @@
+{
+  "id": "proj_45cb298f",
+  "metadata": {
+    "title": "New Project",
+    "artist": "Unknown / User Upload",
+    "year": "-",
+    "technique": "Oil on canvas",
+    "description": "No description available. Please load data.",
+    "bibliography": ""
+  },
+  "fair_metadata": {
+    "@context": "https://schema.org/",
+    "@type": "Dataset",
+    "identifier": "urn:uuid:3a63f2b8-d7b3-4a8e-be77-2be89dc2aa43",
+    "name": "FieldSpectralView Project proj_45cb298f",
+    "description": "No description available. Please load data.",
+    "license": "https://creativecommons.org/licenses/by/4.0/",
+    "dateCreated": "2026-04-10T18:21:57.367401",
+    "dateModified": "2026-04-10T18:21:57.367401",
+    "creator": {
+      "@type": "Person",
+      "name": "Unknown Researcher"
+    },
+    "softwareAgent": {
+      "@type": "SoftwareApplication",
+      "name": "FieldSpectralView Art SpectraLens",
+      "version": "1.0.0",
+      "applicationCategory": "mScience"
+    },
+    "distribution": {
+      "@type": "DataDownload",
+      "encodingFormat": "application/json",
+      "contentUrl": "local://projects/proj_45cb298f.json"
+    }
+  },
+  "layers": [
+    {
+      "type": "Custom Upload",
+      "imageUrl": "/api/files/registered_32966988_685nm.png",
+      "description": "685nm"
+    },
+    {
+      "type": "Custom Upload",
+      "imageUrl": "/api/files/registered_ac145041_740nm.png",
+      "description": "740nm"
+    },
+    {
+      "type": "False Color",
+      "description": "FalseColor_9767",
+      "imageUrl": "/api/files/falsecolor_555c62e5.png"
+    },
+    {
+      "type": "Custom Upload",
+      "description": "VI_NDVI_4241",
+      "imageUrl": "/api/files/vi_ndvi_4e19d4fc.png"
+    }
+  ],
+  "annotations": [],
+  "timestamp": "2026-04-10T18:21:57.367401",
+  "last_modified": "2026-04-10T18:21:57.367401"
+}

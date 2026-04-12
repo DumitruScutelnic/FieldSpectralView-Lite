@@ -1,0 +1,102 @@
+/* FieldSpectralView Static — Custom Styles */
+
+/* ---- Scrollbars ---- */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #121212; }
+::-webkit-scrollbar-thumb { background: #404040; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #047842; }
+
+/* ---- Shimmer loader animation ---- */
+@keyframes shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+}
+.animate-shimmer { animation: shimmer 1.2s infinite ease-in-out; }
+
+/* ---- Marker pulse ---- */
+@keyframes pulse {
+    0%   { transform: translate(-50%, -50%) scale(1);   box-shadow: 0 0 0 0 rgba(4, 120, 66, 0.7); }
+    70%  { transform: translate(-50%, -50%) scale(1.1);  box-shadow: 0 0 0 10px rgba(4, 120, 66, 0); }
+    100% { transform: translate(-50%, -50%) scale(1);   box-shadow: 0 0 0 0 rgba(4, 120, 66, 0); }
+}
+.pulse-dot { animation: pulse 2s infinite; }
+
+/* ---- Fade-in ---- */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+/* ---- No-select during drag ---- */
+.cursor-crosshair, .cursor-ew-resize { user-select: none; -webkit-user-select: none; }
+
+/* ---- Archive card hover ---- */
+.archive-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.3s ease;
+}
+.archive-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+    border-color: #047842;
+}
+
+/* ---- Mode buttons ---- */
+.mode-btn {
+    background: #1a1a1a; color: #9ca3af; border-color: #374151;
+}
+.mode-btn:hover { border-color: #6b7280; color: #e5e7eb; }
+.mode-btn.active {
+    background: #047842; color: #000; border-color: #047842;
+}
+
+/* ---- Tool buttons ---- */
+.tool-btn { color: #9ca3af; }
+.tool-btn:hover { color: #fff; background: #374151; }
+.tool-btn.active { background: #047842; color: #000; }
+
+/* ---- Sidebar Tabs ---- */
+.sidebar-tab { color: #6b7280; border-bottom: 2px solid transparent; transition: all 0.2s; }
+.sidebar-tab:hover { color: #d1d5db; }
+.sidebar-tab.active {
+    color: #047842; border-bottom-color: #047842; background: #2d2d2d;
+}
+
+/* ---- Annotation Pin ---- */
+.annotation-pin {
+    width: 24px; height: 24px; margin-left: -12px; margin-top: -12px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    background: #047842; color: #000; border: 2px solid #04784260;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    cursor: pointer; position: absolute; z-index: 10;
+    transition: transform 0.15s ease, background 0.2s ease;
+}
+.annotation-pin:hover { transform: scale(1.3); }
+.annotation-pin.selected {
+    background: #fff; color: #000; border-color: #ef4444; transform: scale(1.3);
+}
+
+/* ---- Range Input ---- */
+input[type=range]::-webkit-slider-thumb {
+    appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #047842; border: 2px solid #fff; cursor: pointer;
+}
+
+/* ---- Checkbox accent ---- */
+input[type=checkbox] { accent-color: #047842; }
+
+/* ---- VI estimation styling ---- */
+.vi-card {
+    transition: transform 0.1s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+.vi-card:hover:not(.opacity-50) {
+    transform: translateX(4px);
+    background-color: #252525;
+}
+.vi-compute-btn {
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+.vi-compute-btn:active {
+    transform: scale(0.95);
+}

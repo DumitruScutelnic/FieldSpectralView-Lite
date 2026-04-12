@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FieldSpectralView — Agricultural Analysis</title>
+    <meta name="description" content="Interactive multispectral viewer for agricultural and environmental analysis. Compare VIS, NIR, NDVI and False Color imagery.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        museum: { 900: '#1a1a1a', 800: '#2d2d2d', 700: '#404040', accent: '#047842' },
+                        paper: '#f4f1ea'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-museum-900 text-white overflow-hidden w-screen h-screen flex flex-col" style="font-family:'Inter',sans-serif;">
+
+    <!-- ============ LOADING SCREEN ============ -->
+    <div id="loading-screen" class="fixed inset-0 z-[100] bg-museum-900 flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="w-16 h-16 bg-museum-accent rounded-sm flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(4,120,66,0.3)]">
+            <span class="text-museum-900 font-bold text-3xl" style="font-family:'Playfair Display',serif;">F</span>
+        </div>
+        <h1 class="text-2xl font-bold tracking-widest text-gray-100" style="font-family:'Playfair Display',serif;">FieldSpectralView</h1>
+        <p class="text-xs uppercase tracking-[0.3em] mt-2 text-museum-accent/80">Agricultural Analysis</p>
+        <div class="mt-8 w-48 h-0.5 bg-museum-800 overflow-hidden rounded-full">
+            <div class="h-full bg-museum-accent w-1/2 animate-shimmer"></div>
+        </div>
+    </div>
+
+    <!-- ============ TOP NAVBAR ============ -->
+    <nav class="h-14 border-b border-museum-800 flex items-center px-6 bg-museum-900 z-50 shadow-md justify-between flex-shrink-0">
+        <div class="flex items-center gap-3 cursor-pointer" id="logo-click">
+            <div class="w-8 h-8 bg-museum-accent rounded-sm flex items-center justify-center">
+                <span class="text-museum-900 font-bold text-lg" style="font-family:'Playfair Display',serif;">F</span>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-wide text-gray-100" style="font-family:'Playfair Display',serif;">FieldSpectralView</h1>
+                <p class="text-[9px] text-museum-accent uppercase tracking-widest">Agricultural Analysis</p>
+            </div>
+        </div>
+        <div class="flex gap-6 text-[11px] font-bold text-gray-400 uppercase tracking-widest items-center">
+            <button id="nav-archive" class="hover:text-white transition-colors border-b-2 pb-1 text-white border-museum-accent">Archive</button>
+            <button id="nav-analysis" class="hover:text-white transition-colors border-b-2 pb-1 border-transparent">Analysis</button>
+        </div>
+    </nav>
+
+    <!-- ============ ARCHIVE VIEW ============ -->
+    <div id="view-archive" class="flex-1 overflow-y-auto p-8">
+        <div class="max-w-5xl mx-auto">
+            <div class="mb-8 border-b border-gray-800 pb-4">
+                <h2 class="text-3xl text-white mb-2" style="font-family:'Playfair Display',serif;">Digital Archive</h2>
+                <p class="text-gray-400 text-sm">Select an existing case study to view diagnostic data.</p>
+            </div>
+            <div id="archive-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ANALYSIS VIEW ============ -->
+    <main id="view-analysis" class="flex-1 flex overflow-hidden hidden">
+
+        <!-- LEFT SIDEBAR -->
+        <aside id="sidebar" class="w-96 bg-museum-800 border-r border-black flex flex-col z-20 shadow-2xl transition-all duration-300 overflow-hidden flex-shrink-0">
+            <div class="w-96 min-w-[24rem] flex flex-col h-full">
+
+                <!-- Header -->
+                <div class="p-4 border-b border-black bg-[#1a1a1a]">
+                    <div class="flex justify-between items-start mb-2">
+                        <button id="btn-back" class="text-gray-500 hover:text-white text-xs flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                            BACK
+                        </button>
+                        <button id="btn-export-json" class="flex items-center gap-1 bg-museum-accent text-black px-3 py-1 rounded text-xs font-bold uppercase hover:bg-white transition-colors">
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Export
+                        </button>
+                    </div>
+                    <h2 id="project-title" class="text-xl text-white mb-1" style="font-family:'Playfair Display',serif;">—</h2>
+                    <p id="project-author" class="text-xs text-museum-accent font-mono">—</p>
+                    <p id="project-description" class="text-xs text-gray-400 mt-2 leading-relaxed">—</p>
+                </div>
+
+                <!-- Tabs -->
+                <div class="flex border-b border-black bg-[#252525] flex-shrink-0">
+                    <button class="sidebar-tab flex-1 py-3 text-xs font-bold uppercase tracking-wider" data-tab="layers">Layers</button>
+                    <button class="sidebar-tab flex-1 py-3 text-xs font-bold uppercase tracking-wider" data-tab="data">Data</button>
+                    <button class="sidebar-tab flex-1 py-3 text-xs font-bold uppercase tracking-wider" data-tab="export">Export</button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
+
+                    <!-- LAYERS TAB -->
+                    <div id="tab-layers" class="tab-content space-y-6">
+                        <!-- Metadata -->
+                        <div>
+                            <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Metadata</h3>
+                            <div id="metadata-panel" class="bg-[#1a1a1a] p-3 rounded border border-gray-700 space-y-2 text-sm text-gray-300">
+                                <!-- filled by JS -->
+                            </div>
+                        </div>
+
+                        <!-- View Mode Buttons -->
+                        <div>
+                            <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Visual Mode</h3>
+                            <div class="grid grid-cols-4 gap-2 mb-2">
+                                <button class="mode-btn p-2 rounded border text-[10px] flex flex-col items-center justify-center gap-1 transition-all" data-mode="compare">
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                                    <span>Slider</span>
+                                </button>
+                                <button class="mode-btn p-2 rounded border text-[10px] flex flex-col items-center justify-center gap-1 transition-all" data-mode="sxs">
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+                                    <span>SxS</span>
+                                </button>
+                                <button class="mode-btn p-2 rounded border text-[10px] flex flex-col items-center justify-center gap-1 transition-all" data-mode="mapper">
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                    <span>Mapper</span>
+                                </button>
+                                <button class="mode-btn p-2 rounded border text-[10px] flex flex-col items-center justify-center gap-1 transition-all" data-mode="alpha">
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                    <span>Alpha</span>
+                                </button>
+                            </div>
+                            <!-- Alpha slider (hidden unless alpha mode) -->
+                            <div id="alpha-controls" class="hidden bg-[#1a1a1a] border border-gray-700 rounded p-2">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-[10px] text-gray-400 uppercase font-bold">Layer Opacity</span>
+                                    <span id="alpha-value" class="text-[10px] text-museum-accent font-mono">50%</span>
+                                </div>
+                                <input type="range" id="alpha-slider" min="0" max="100" value="50" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-museum-accent">
+                                <div class="flex justify-between text-[8px] text-gray-500 mt-1">
+                                    <span>Ref (Layer 2)</span><span>Active (Layer 1)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Layer Selectors -->
+                        <div>
+                            <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Layer Configuration</h3>
+                            <div class="space-y-2">
+                                <div class="flex gap-2 items-center">
+                                    <span id="layer1-label" class="text-xs text-gray-400 w-10">Left</span>
+                                    <select id="layer-left" class="flex-1 bg-[#1a1a1a] border border-gray-700 text-gray-300 text-xs p-1.5 rounded truncate"></select>
+                                </div>
+                                <div class="flex gap-2 items-center">
+                                    <span id="layer2-label" class="text-xs text-gray-400 w-10">Right</span>
+                                    <select id="layer-right" class="flex-1 bg-[#1a1a1a] border border-gray-700 text-gray-300 text-xs p-1.5 rounded truncate"></select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ============ VEGETATION INDICES ESTIMATION ============ -->
+                        <div class="border-t border-gray-700 pt-4">
+                            <button id="vi-section-toggle" class="flex items-center justify-between w-full group mb-3">
+                                <h3 class="text-[10px] uppercase text-gray-500 font-bold flex items-center gap-2">
+                                    <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                                    Vegetation Indices (VI) Estimation
+                                </h3>
+                                <svg id="vi-toggle-icon" class="w-4 h-4 text-gray-500 group-hover:text-white transition-all duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                            </button>
+
+                            <!-- Available Bands Badge Row -->
+                            <div id="vi-bands-available" class="mb-3 hidden">
+                                <p class="text-[9px] text-gray-500 uppercase font-bold mb-1.5">Available Bands in Dataset</p>
+                                <div id="vi-bands-list" class="flex flex-wrap gap-1">
+                                    <!-- filled by JS -->
+                                </div>
+                            </div>
+
+                            <!-- VI Cards Container -->
+                            <div id="vi-cards-container" class="space-y-2 hidden">
+                                <!-- filled by JS -->
+                            </div>
+
+                            <!-- Active VI Info -->
+                            <div id="vi-active-info" class="hidden mt-3 bg-emerald-900/20 border border-emerald-700/40 rounded p-2.5">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-[10px] text-emerald-400 font-bold uppercase" id="vi-active-name">—</span>
+                                    <button id="vi-clear-btn" class="text-[9px] text-gray-400 hover:text-red-400 uppercase font-bold transition-colors">✕ Clear</button>
+                                </div>
+                                <p class="text-[9px] text-gray-400" id="vi-active-stats">—</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DATA TAB -->
+                    <div id="tab-data" class="tab-content space-y-4 hidden">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-[10px] uppercase text-gray-500 font-bold">Points of Interest</h3>
+                            <span id="annotation-count" class="text-[10px] bg-museum-800 text-museum-accent px-2 py-0.5 rounded">0 points</span>
+                        </div>
+                        <!-- Annotation Detail Panel (shown when one is selected) -->
+                        <div id="annotation-detail" class="hidden bg-[#1a1a1a] p-4 rounded border border-museum-accent">
+                            <!-- filled by JS -->
+                        </div>
+                        <!-- Annotation List -->
+                        <div id="annotation-list" class="space-y-2">
+                            <!-- filled by JS -->
+                        </div>
+
+                        <!-- Spectral Plot -->
+                        <div class="mt-6 border-t border-gray-800 pt-4">
+                            <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Spectral Plot Viewer</h3>
+                            <div class="bg-[#1e1e1e] rounded border border-gray-700 p-2">
+                                <div class="flex gap-2 mb-2">
+                                    <input id="plot-x-label" class="w-1/2 bg-[#1a1a1a] text-[9px] text-gray-400 border border-gray-700 p-1 rounded focus:border-museum-accent focus:outline-none" value="Wavelength (nm)" placeholder="X Axis">
+                                    <input id="plot-y-label" class="w-1/2 bg-[#1a1a1a] text-[9px] text-gray-400 border border-gray-700 p-1 rounded focus:border-museum-accent focus:outline-none" value="Reflectance (%)" placeholder="Y Axis">
+                                </div>
+                                <div class="h-44 w-full bg-[#151515] border border-gray-800 rounded mb-2 overflow-hidden relative">
+                                    <canvas id="spectralChart"></canvas>
+                                    <div id="chart-empty" class="absolute inset-0 flex items-center justify-center text-[10px] text-gray-600">No spectral data loaded</div>
+                                </div>
+                                <div id="plot-legend" class="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
+                                    <!-- filled by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- EXPORT TAB -->
+                    <div id="tab-export" class="tab-content space-y-4 hidden">
+                        <h3 class="text-[10px] uppercase text-gray-500 font-bold mb-2">Download & Export</h3>
+                        <button id="export-json-btn" class="w-full py-3 bg-museum-accent text-black font-bold rounded text-xs uppercase tracking-wider hover:bg-white transition-colors flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Export Metadata (.json)
+                        </button>
+                        <button id="export-csv-btn" class="w-full py-3 bg-[#1a1a1a] text-gray-300 font-bold rounded text-xs uppercase tracking-wider hover:bg-gray-700 transition-colors border border-gray-600 flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            Export Measurements (.csv)
+                        </button>
+                        <p class="text-[10px] text-gray-500 italic">Files are generated client-side. No server required.</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER VIEWER AREA -->
+        <div class="flex-1 bg-[#151515] relative overflow-hidden flex flex-col">
+
+            <!-- Mapper Toolbar (only visible in mapper mode) -->
+            <div id="mapper-toolbar" class="hidden absolute top-4 left-4 z-30 bg-museum-800 rounded shadow-xl border border-gray-600 flex flex-col p-1 gap-1">
+                <button class="tool-btn p-2 rounded" data-tool="pointer" title="Select / Pan">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/></svg>
+                </button>
+                <button class="tool-btn p-2 rounded" data-tool="marker" title="Add Measurement Point">
+                    <div class="w-5 h-5 flex items-center justify-center font-bold text-[9px] border border-current rounded-full">P+</div>
+                </button>
+            </div>
+
+            <!-- Sidebar Toggle Button -->
+            <button id="btn-toggle-sidebar" class="absolute top-4 left-4 z-50 p-2 bg-museum-800/80 text-white rounded-full hover:bg-museum-accent hover:text-black transition-all border border-gray-600 backdrop-blur">
+                <svg id="sidebar-icon-close" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+                <svg id="sidebar-icon-open" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+
+            <!-- Viewer Content -->
+            <div id="viewer-area" class="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
+                <!-- VI Canvas Overlay -->
+                <canvas id="vi-overlay-canvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-30 hidden"></canvas>
+
+                <!-- VI Color Legend -->
+                <div id="vi-color-legend" class="absolute top-4 right-4 z-40 hidden">
+                    <div class="bg-[#1a1a1a]/90 backdrop-blur border border-gray-700 rounded-lg p-2.5 shadow-2xl">
+                        <p id="vi-legend-title" class="text-[9px] text-gray-300 font-bold uppercase tracking-wider mb-2 text-center">NDVI</p>
+                        <div class="flex items-stretch gap-2">
+                            <div id="vi-legend-bar" class="w-4 h-32 rounded-sm" style="background: linear-gradient(to bottom, #1a9850, #91cf60, #d9ef8b, #fee08b, #fc8d59, #d73027);"></div>
+                            <div class="flex flex-col justify-between text-[8px] text-gray-400 font-mono">
+                                <span id="vi-legend-max">1.0</span>
+                                <span id="vi-legend-mid">0.0</span>
+                                <span id="vi-legend-min">-1.0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- MODE: COMPARE (Split-View Slider) -->
+                <div id="mode-compare" class="absolute inset-0 cursor-ew-resize select-none">
+                    <div class="absolute inset-0" id="compare-right"><img id="img-right" src="" class="w-full h-full object-contain pointer-events-none"></div>
+                    <div id="compare-left" class="absolute inset-0 z-10 overflow-hidden border-r-2 border-museum-accent" style="width:50%">
+                        <div id="compare-left-inner" class="absolute top-0 left-0 h-full"><img id="img-left" src="" class="h-full object-contain pointer-events-none"></div>
+                        <div class="absolute top-4 left-4 bg-black/70 text-museum-accent px-2 py-1 text-[10px] rounded uppercase font-bold tracking-wider" id="label-left">—</div>
+                    </div>
+                    <div class="absolute top-4 right-4 bg-black/70 text-white px-2 py-1 text-[10px] rounded uppercase font-bold tracking-wider z-10" id="label-right">—</div>
+                    <div id="slider-handle" class="absolute top-0 bottom-0 z-20 w-1 bg-museum-accent cursor-ew-resize flex items-center justify-center shadow-[0_0_10px_rgba(0,0,0,0.5)]" style="left:50%">
+                        <div class="w-8 h-8 bg-museum-accent rounded-full flex items-center justify-center shadow-lg pointer-events-none">
+                            <svg class="w-4 h-4 text-museum-900" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/></svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MODE: SIDE BY SIDE -->
+                <div id="mode-sxs" class="absolute inset-0 hidden flex cursor-grab active:cursor-grabbing">
+                    <div class="flex-1 relative border-r border-gray-800 overflow-hidden">
+                        <div id="sxs-left-wrap" class="w-full h-full flex items-center justify-center"><img id="sxs-img-left" src="" class="w-full h-full object-contain pointer-events-none"></div>
+                        <div class="absolute top-4 left-4 bg-black/70 text-museum-accent px-2 py-1 text-[10px] rounded font-bold border border-museum-accent/30" id="sxs-label-left">—</div>
+                    </div>
+                    <div class="flex-1 relative overflow-hidden">
+                        <div id="sxs-right-wrap" class="w-full h-full flex items-center justify-center"><img id="sxs-img-right" src="" class="w-full h-full object-contain pointer-events-none"></div>
+                        <div class="absolute top-4 left-4 bg-black/70 text-white px-2 py-1 text-[10px] rounded font-bold border border-gray-600" id="sxs-label-right">—</div>
+                    </div>
+                </div>
+
+                <!-- MODE: ALPHA BLEND -->
+                <div id="mode-alpha" class="absolute inset-0 hidden cursor-grab active:cursor-grabbing">
+                    <div id="alpha-wrap" class="w-full h-full flex items-center justify-center relative">
+                        <img id="alpha-img-bottom" src="" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="z-index:1">
+                        <img id="alpha-img-top" src="" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="z-index:2;opacity:0.5">
+                    </div>
+                    <div class="absolute top-4 left-14 flex flex-col gap-2 pointer-events-none z-10">
+                        <div class="bg-black/70 text-museum-accent px-2 py-1 text-[10px] rounded font-bold border border-museum-accent/30 w-fit" id="alpha-label-top">Top: —</div>
+                        <div class="bg-black/70 text-white px-2 py-1 text-[10px] rounded font-bold border border-gray-600 w-fit" id="alpha-label-btm">Btm: —</div>
+                    </div>
+                </div>
+
+                <!-- MODE: MAPPER (Annotation Points) -->
+                <div id="mode-mapper" class="absolute inset-0 hidden overflow-hidden">
+                    <div id="mapper-wrap" class="w-full h-full flex items-center justify-center">
+                        <div class="relative w-full h-full" id="mapper-canvas">
+                            <img id="mapper-img" src="" class="w-full h-full object-contain pointer-events-none select-none">
+                            <!-- Annotation pins rendered here by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Zoom Controls -->
+                <div id="zoom-controls" class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 bg-[#1a1a1a]/90 p-1.5 rounded-full border border-gray-700 backdrop-blur shadow-2xl">
+                    <button id="zoom-out" class="w-8 h-8 rounded-full bg-museum-800 text-white hover:bg-museum-accent hover:text-black font-bold border border-gray-600 transition-colors flex items-center justify-center">−</button>
+                    <span id="zoom-level" class="text-xs font-mono w-12 text-center text-gray-300">100%</span>
+                    <button id="zoom-in" class="w-8 h-8 rounded-full bg-museum-800 text-white hover:bg-museum-accent hover:text-black font-bold border border-gray-600 transition-colors flex items-center justify-center">+</button>
+                    <div class="w-px h-4 bg-gray-600 mx-1"></div>
+                    <button id="zoom-reset" class="text-[10px] px-2 text-gray-400 hover:text-white uppercase font-bold tracking-wider">Reset</button>
+                </div>
+            </div>
+
+            <!-- Footer Status Bar -->
+            <div class="h-8 bg-[#1a1a1a] border-t border-gray-800 flex items-center px-4 justify-between text-[10px] text-gray-500 flex-shrink-0">
+                <span id="status-layer">Active: —</span>
+                <span id="status-tool">Tool: Slider</span>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
