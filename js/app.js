@@ -308,6 +308,7 @@
         state.layer2Idx = Math.min(1, data.layers.length - 1);
         state.selectedAnnotationId = null;
         state.transform = { scale: 1, x: 0, y: 0 };
+        state.sliderPos = 50;
         // default plot: show all measurements
         state.plotVisibleIds = [];
         data.annotations.forEach(a => a.measurements.forEach(m => state.plotVisibleIds.push(m.id)));
@@ -376,7 +377,10 @@
         showView('analysis');
         renderSidebar();
         setMode('compare');
-        updateImages();
+        // Sync CSS transforms and slider DOM with the reset state
+        applyTransform();
+        $('#compare-left').style.clipPath = `inset(0 ${100 - state.sliderPos}% 0 0)`;
+        $('#slider-handle').style.left = state.sliderPos + '%';
         renderAnnotations();
         updateChart();
     }
@@ -1215,8 +1219,9 @@
             if (state.isSliderDragging) { onSliderMove(e.touches[0].clientX); return; }
         });
 
-        // Also allow clicking anywhere on compare to move slider
+        // Allow clicking anywhere on compare to move slider (except shift+click = pan)
         compareEl.addEventListener('mousedown', (e) => {
+            if (e.shiftKey) return;  // shift+drag = pan, not slider
             if (!e.target.closest('#slider-handle')) {
                 state.isSliderDragging = true;
                 onSliderMove(e.clientX);
