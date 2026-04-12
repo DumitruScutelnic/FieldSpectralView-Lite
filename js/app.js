@@ -917,36 +917,31 @@
         container.innerHTML = '';
 
         VI_DEFINITIONS.forEach(vi => {
-            const hasAll = vi.bands.every(b => available.has(b));
-
             const card = document.createElement('div');
-            card.className = `vi-card bg-[#1e1e1e] border ${hasAll ? 'border-emerald-900/50 hover:border-emerald-600/50 cursor-pointer' : 'border-gray-800 opacity-50'} rounded p-2 transition-colors`;
+            card.className = `vi-card bg-[#1e1e1e] border border-emerald-900/50 hover:border-emerald-600/50 cursor-pointer rounded p-2 transition-colors`;
 
-            // Band chips with nm tooltip
+            // Band chips with nm tooltip (green if detected in dataset, grey if not)
             const bandChips = vi.bands.map(b => {
                 const info = BAND_NM_INFO[b] || { range: '—', label: b, color: '#9ca3af' };
                 const ok = available.has(b);
-                return `<span title="${info.label} · ${info.range}" class="text-[8px] ${ok ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' : 'bg-red-900/50 text-red-400 border-red-700'} border rounded px-1 whitespace-nowrap">${b} <span class="opacity-60">${info.range}</span></span>`;
+                return `<span title="${info.label} · ${info.range}" class="text-[8px] ${ok ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' : 'bg-gray-800 text-gray-500 border-gray-700'} border rounded px-1 whitespace-nowrap">${b} <span class="opacity-60">${info.range}</span></span>`;
             }).join('');
 
             card.innerHTML = `
                 <div class="flex justify-between items-start mb-1">
                     <div>
-                        <h4 class="text-[11px] font-bold ${hasAll ? 'text-emerald-400' : 'text-gray-500'}">${vi.name}</h4>
+                        <h4 class="text-[11px] font-bold text-emerald-400">${vi.name}</h4>
                         <p class="text-[8px] text-gray-500 font-mono">${vi.formula}</p>
                     </div>
-                    <button class="vi-compute-btn bg-emerald-700 text-white text-[9px] font-bold px-2 py-0.5 rounded uppercase ${hasAll ? 'hover:bg-emerald-600' : 'hidden'}" data-vi="${vi.id}">Run</button>
-                    ${!hasAll ? '<span class="text-[8px] text-red-500 font-bold uppercase bg-red-900/30 px-1 py-0.5 rounded">Missing Bands</span>' : ''}
+                    <button class="vi-compute-btn bg-emerald-700 hover:bg-emerald-600 text-white text-[9px] font-bold px-2 py-0.5 rounded uppercase" data-vi="${vi.id}">Run</button>
                 </div>
                 <p class="text-[9px] text-gray-400 leading-tight mb-2">${vi.desc}</p>
                 <div class="flex flex-wrap gap-1">${bandChips}</div>
             `;
 
-            if (hasAll) {
-                const btn = card.querySelector('.vi-compute-btn');
-                btn.addEventListener('click', (e) => { e.stopPropagation(); computeVI(vi); });
-                card.addEventListener('click', () => computeVI(vi));
-            }
+            const btn = card.querySelector('.vi-compute-btn');
+            btn.addEventListener('click', (e) => { e.stopPropagation(); computeVI(vi); });
+            card.addEventListener('click', () => computeVI(vi));
 
             container.appendChild(card);
         });
@@ -963,6 +958,7 @@
             // 1. Load images into memory
             const bandImgs = {};
             for (const layer of ds.layers) {
+                if (layer._isVI) continue;
                 if (layer.band === 'RGB') {
                     bandImgs['RED'] = layer; bandImgs['GREEN'] = layer; bandImgs['BLUE'] = layer;
                 } else if (layer.band) {
@@ -970,22 +966,25 @@
                 }
             }
 
-            // Needed layers (unique files)
-            const neededFiles = new Set(vi.bands.map(b => bandImgs[b].filename));
+            // Needed layers (unique files, only for bands that exist)
+            const neededFiles = new Set(
+                vi.bands.filter(b => bandImgs[b]).map(b => bandImgs[b].filename)
+            );
             const imgDataMap = {};
             let width = 0, height = 0;
 
             for (const fname of neededFiles) {
                 const img = new Image();
-                // Session: serve from ObjectURL; static: serve from datasets path
-                if (ds._isSession) {
-                    img.src = session.layerFiles.find(lf => lf.filename === fname)?.objectUrl || '';
+                // Session layers carry _objectUrl; static datasets use path
+                const layer = ds.layers.find(l => l.filename === fname);
+                if (layer?._objectUrl) {
+                    img.src = layer._objectUrl;
                 } else {
                     img.crossOrigin = 'anonymous';
                     img.src = `datasets/${state.datasetId}/${fname}`;
                 }
                 await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
-                
+
                 const cvs = document.createElement('canvas');
                 width = img.width; height = img.height;
                 cvs.width = width; cvs.height = height;
@@ -993,6 +992,9 @@
                 ctx.drawImage(img, 0, 0);
                 imgDataMap[fname] = ctx.getImageData(0, 0, width, height).data;
             }
+
+            // If no images loaded at all, use a 256×256 blank canvas
+            if (width === 0) { width = 256; height = 256; }
 
             // 2. Compute pixel by pixel
             const resultCvs = document.createElement('canvas');
@@ -1007,16 +1009,18 @@
                 const pxPtr = i * 4;
                 const vals = {};
                 
-                // Extract band values
+                // Extract band values (missing bands default to 0)
                 vi.bands.forEach(b => {
-                    const fname = bandImgs[b].filename;
-                    const data = imgDataMap[fname];
-                    if (bandImgs[b].band === 'RGB') {
-                        if (b === 'RED') vals.R = data[pxPtr] / 255;
+                    const layer = bandImgs[b];
+                    if (!layer) { vals[b] = 0; return; }
+                    const data = imgDataMap[layer.filename];
+                    if (!data) { vals[b] = 0; return; }
+                    if (layer.band === 'RGB') {
+                        if (b === 'RED')   vals.R = data[pxPtr]     / 255;
                         if (b === 'GREEN') vals.G = data[pxPtr + 1] / 255;
-                        if (b === 'BLUE') vals.B = data[pxPtr + 2] / 255;
+                        if (b === 'BLUE')  vals.B = data[pxPtr + 2] / 255;
                     } else {
-                        // Assuming monochrome NIR/RE is in all RGB channels, take Red channel
+                        // Monochrome band: take red channel
                         vals[b] = data[pxPtr] / 255;
                     }
                 });
