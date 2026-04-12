@@ -33,6 +33,18 @@
     const PLOT_COLORS = ['#047842', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
 
     // ===========================
+    //  BAND → NM RANGE TABLE
+    // ===========================
+    const BAND_NM_INFO = {
+        'RGB':   { range: '400–700 nm',  label: 'Visible (RGB)',  color: '#e5e7eb' },
+        'BLUE':  { range: '400–500 nm',  label: 'Blue',           color: '#60a5fa' },
+        'GREEN': { range: '500–600 nm',  label: 'Green',          color: '#4ade80' },
+        'RED':   { range: '600–700 nm',  label: 'Red',            color: '#f87171' },
+        'RE':    { range: '700–760 nm',  label: 'Red Edge',       color: '#fb923c' },
+        'NIR':   { range: '760–900+ nm', label: 'Near-Infrared',  color: '#c084fc' }
+    };
+
+    // ===========================
     //  SESSION STATE (browser-only, no server)
     // ===========================
     const session = {
@@ -433,9 +445,9 @@
             <div class="flex justify-between items-center border-b border-gray-800 pb-1"><span class="text-gray-500">Date</span><span>${m.date || '—'}</span></div>
             <div class="flex justify-between items-center border-b border-gray-800 pb-1"><span class="text-gray-500">Coordinates</span><span class="text-xs">${m.coordinates || '—'}</span></div>
             <div class="flex justify-between items-center border-b border-gray-800 pb-1"><span class="text-gray-500">Sensor</span><span class="text-xs">${m.sensor || m.technique || '—'}</span></div>
-            <div class="flex justify-between items-center"><span class="text-gray-500">Layers</span><span>${ds.layers.length}</span></div>`;
+            <div class="flex justify-between items-center"><span class="text-gray-500">Layers</span><span>${ds.layers.filter(l=>!l._isVI).length} <span class="text-gray-600 text-[9px]">${ds.layers.filter(l=>l._isVI).length ? '+ ' + ds.layers.filter(l=>l._isVI).length + ' VI' : ''}</span></span></div>`;
 
-        // Layer dropdowns
+        // Layer dropdowns (VI layers are real entries in ds.layers now)
         const leftSel = $('#layer-left');
         const rightSel = $('#layer-right');
         leftSel.innerHTML = '';
@@ -444,13 +456,6 @@
             leftSel.innerHTML += `<option value="${i}"${i === state.layer1Idx ? ' selected' : ''}>${l.description}</option>`;
             rightSel.innerHTML += `<option value="${i}"${i === state.layer2Idx ? ' selected' : ''}>${l.description}</option>`;
         });
-
-        // Add VI virtual layer if active
-        if (state.viActive) {
-            const viIdx = ds.layers.length;
-            leftSel.innerHTML += `<option value="${viIdx}"${viIdx === state.layer1Idx ? ' selected' : ''}>[VI] ${state.viActive.name}</option>`;
-            rightSel.innerHTML += `<option value="${viIdx}"${viIdx === state.layer2Idx ? ' selected' : ''}>[VI] ${state.viActive.name}</option>`;
-        }
 
         // Annotation count
         $('#annotation-count').textContent = `${ds.annotations.length} points`;
@@ -519,93 +524,45 @@
     // ===========================
     function getLayerUrl(idx) {
         const ds = state.currentDataset;
-        if (!ds) return '';
-        if (idx === ds.layers.length && state.viActive) {
-            return ''; // VI uses the overlay canvas instead of img src
-        }
-        if (!ds.layers[idx]) return '';
-        // Session mode: serve images from in-memory ObjectURLs
-        if (ds._isSession) return ds.layers[idx]._objectUrl || '';
+        if (!ds || !ds.layers[idx]) return '';
+        // VI layers and session layers both carry _objectUrl
+        if (ds.layers[idx]._objectUrl) return ds.layers[idx]._objectUrl;
         return `datasets/${state.datasetId}/${ds.layers[idx].filename}`;
     }
     function getLayerLabel(idx) {
         const ds = state.currentDataset;
         if (!ds) return '—';
-        if (idx === ds.layers.length && state.viActive) {
-            return `[VI] ${state.viActive.name}`;
-        }
         return ds.layers[idx]?.description || '—';
     }
 
     function updateImages() {
         const url1 = getLayerUrl(state.layer1Idx);
         const url2 = getLayerUrl(state.layer2Idx);
-        const ds = state.currentDataset;
-        const viIdx = ds ? ds.layers.length : -1;
-
-        // Base image updates
-        const updateImgSrc = (el, url, isVi) => {
-            if (!el) return;
-            if (isVi) {
-                el.style.opacity = 0; // Hide the img element, let canvas show through behind it
-            } else {
-                el.style.opacity = 1;
-                el.src = url;
-            }
-        };
 
         // Compare
-        updateImgSrc($('#img-left'), url1, state.layer1Idx === viIdx);
-        updateImgSrc($('#img-right'), url2, state.layer2Idx === viIdx);
+        const imgLeft = $('#img-left'); if (imgLeft) { imgLeft.style.opacity = 1; imgLeft.src = url1; }
+        const imgRight = $('#img-right'); if (imgRight) { imgRight.style.opacity = 1; imgRight.src = url2; }
         $('#label-left').textContent = getLayerLabel(state.layer1Idx);
         $('#label-right').textContent = getLayerLabel(state.layer2Idx);
 
         // SxS
-        updateImgSrc($('#sxs-img-left'), url1, state.layer1Idx === viIdx);
-        updateImgSrc($('#sxs-img-right'), url2, state.layer2Idx === viIdx);
+        const sxsL = $('#sxs-img-left'); if (sxsL) { sxsL.style.opacity = 1; sxsL.src = url1; }
+        const sxsR = $('#sxs-img-right'); if (sxsR) { sxsR.style.opacity = 1; sxsR.src = url2; }
         $('#sxs-label-left').textContent = getLayerLabel(state.layer1Idx);
         $('#sxs-label-right').textContent = getLayerLabel(state.layer2Idx);
 
         // Alpha
-        updateImgSrc($('#alpha-img-top'), url1, state.layer1Idx === viIdx);
-        if ($('#alpha-img-top')) $('#alpha-img-top').style.opacity = (state.layer1Idx === viIdx) ? 0 : state.alphaOpacity / 100;
-        updateImgSrc($('#alpha-img-bottom'), url2, state.layer2Idx === viIdx);
+        const alphaTop = $('#alpha-img-top');
+        if (alphaTop) { alphaTop.style.opacity = state.alphaOpacity / 100; alphaTop.src = url1; }
+        const alphaBtm = $('#alpha-img-bottom'); if (alphaBtm) { alphaBtm.style.opacity = 1; alphaBtm.src = url2; }
         $('#alpha-label-top').textContent = `Top: ${getLayerLabel(state.layer1Idx)}`;
         $('#alpha-label-btm').textContent = `Btm: ${getLayerLabel(state.layer2Idx)}`;
 
         // Mapper
-        updateImgSrc($('#mapper-img'), url1, state.layer1Idx === viIdx);
+        const mapperImg = $('#mapper-img'); if (mapperImg) { mapperImg.style.opacity = 1; mapperImg.src = url1; }
 
-        // Canvas overlay handling based on mode
-        const canvas = $('#vi-overlay-canvas');
-        if (canvas) {
-            if (state.viActive && (state.layer1Idx === viIdx || state.layer2Idx === viIdx)) {
-                canvas.classList.remove('hidden');
-                
-                // Masking for compare mode
-                if (state.mode === 'compare') {
-                    if (state.layer1Idx === viIdx && state.layer2Idx !== viIdx) {
-                        canvas.style.clipPath = `inset(0 ${100 - state.sliderPos}% 0 0)`;
-                    } else if (state.layer2Idx === viIdx && state.layer1Idx !== viIdx) {
-                        canvas.style.clipPath = `inset(0 0 0 ${state.sliderPos}%)`;
-                    } else {
-                        canvas.style.clipPath = 'none';
-                    }
-                } else if (state.mode === 'alpha') {
-                     canvas.style.clipPath = 'none';
-                     if (state.layer1Idx === viIdx) canvas.style.opacity = state.alphaOpacity / 100;
-                     else canvas.style.opacity = 1;
-                } else if (state.mode === 'sxs') {
-                    // SxS requires two canvases ideally, keeping it simple: just show unmasked for now
-                    canvas.style.clipPath = 'none';
-                } else {
-                    canvas.style.clipPath = 'none';
-                }
-            } else {
-                canvas.classList.add('hidden');
-            }
-        }
-
+        // VI overlay canvas is no longer used — always hidden
+        $('#vi-overlay-canvas')?.classList.add('hidden');
     }
 
     // ===========================
@@ -624,18 +581,6 @@
         state.sliderPos = pct;
         $('#compare-left').style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
         $('#slider-handle').style.left = pct + '%';
-        
-        // Update canvas clipping if active
-        const ds = state.currentDataset;
-        const viIdx = ds ? ds.layers.length : -1;
-        if (state.viActive) {
-            const canvas = $('#vi-overlay-canvas');
-            if (state.layer1Idx === viIdx && state.layer2Idx !== viIdx) {
-                canvas.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
-            } else if (state.layer2Idx === viIdx && state.layer1Idx !== viIdx) {
-                canvas.style.clipPath = `inset(0 0 0 ${pct}%)`;
-            }
-        }
     }
 
     // ===========================
@@ -658,10 +603,6 @@
         // Mapper
         const mapperWrap = $('#mapper-wrap');
         if (mapperWrap) { mapperWrap.style.transform = style; mapperWrap.style.transition = transition; }
-        
-        // Global Canvas overlay
-        const canvas = $('#vi-overlay-canvas');
-        if (canvas) { canvas.style.transform = style; canvas.style.transition = transition; canvas.style.transformOrigin = 'center center'; }
 
         $('#zoom-level').textContent = Math.round(t.scale * 100) + '%';
     }
@@ -941,29 +882,53 @@
         const ds = state.currentDataset;
         if (!ds) return;
 
-        // Parse available sub-bands from main bands
+        // Parse available sub-bands from main bands (skip _isVI layers)
         const available = new Set();
+        // Map band → source layer description for nm display
+        const bandSource = {};
         ds.layers.forEach(l => {
+            if (l._isVI) return; // skip computed VI layers
             if (!l.band) return;
             const b = l.band.toUpperCase();
-            if (b === 'RGB') { available.add('RED'); available.add('GREEN'); available.add('BLUE'); }
-            else { available.add(b); }
+            if (b === 'RGB') {
+                ['RED', 'GREEN', 'BLUE'].forEach(sub => {
+                    available.add(sub);
+                    if (!bandSource[sub]) bandSource[sub] = l.description;
+                });
+            } else {
+                available.add(b);
+                if (!bandSource[b]) bandSource[b] = l.description;
+            }
         });
         state.viAvailableBands = Array.from(available);
 
-        // Render available badges
+        // Render available band badges with nm info
         const bandsList = $('#vi-bands-list');
-        bandsList.innerHTML = state.viAvailableBands.map(b => `<span class="bg-gray-800 text-gray-300 text-[8px] font-bold px-1.5 py-0.5 rounded border border-gray-700">${b}</span>`).join('');
-        
+        bandsList.innerHTML = state.viAvailableBands.map(b => {
+            const info = BAND_NM_INFO[b] || { range: '—', label: b, color: '#9ca3af' };
+            const src = bandSource[b] ? ` · ${bandSource[b]}` : '';
+            return `<span title="${info.label}${src}" class="inline-flex flex-col items-center bg-gray-900 border border-gray-700 rounded px-2 py-1 gap-0.5">
+                <span class="text-[9px] font-bold" style="color:${info.color}">${b}</span>
+                <span class="text-[8px] text-gray-400 font-mono">${info.range}</span>
+            </span>`;
+        }).join('');
+
         const container = $('#vi-cards-container');
         container.innerHTML = '';
-        
+
         VI_DEFINITIONS.forEach(vi => {
             const hasAll = vi.bands.every(b => available.has(b));
-            
+
             const card = document.createElement('div');
             card.className = `vi-card bg-[#1e1e1e] border ${hasAll ? 'border-emerald-900/50 hover:border-emerald-600/50 cursor-pointer' : 'border-gray-800 opacity-50'} rounded p-2 transition-colors`;
-            
+
+            // Band chips with nm tooltip
+            const bandChips = vi.bands.map(b => {
+                const info = BAND_NM_INFO[b] || { range: '—', label: b, color: '#9ca3af' };
+                const ok = available.has(b);
+                return `<span title="${info.label} · ${info.range}" class="text-[8px] ${ok ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' : 'bg-red-900/50 text-red-400 border-red-700'} border rounded px-1 whitespace-nowrap">${b} <span class="opacity-60">${info.range}</span></span>`;
+            }).join('');
+
             card.innerHTML = `
                 <div class="flex justify-between items-start mb-1">
                     <div>
@@ -974,20 +939,15 @@
                     ${!hasAll ? '<span class="text-[8px] text-red-500 font-bold uppercase bg-red-900/30 px-1 py-0.5 rounded">Missing Bands</span>' : ''}
                 </div>
                 <p class="text-[9px] text-gray-400 leading-tight mb-2">${vi.desc}</p>
-                <div class="flex gap-1">
-                    ${vi.bands.map(b => `<span class="text-[8px] ${available.has(b) ? 'bg-emerald-900/50 text-emerald-400 border-emerald-700' : 'bg-red-900/50 text-red-400 border-red-700'} border rounded px-1">${b}</span>`).join('')}
-                </div>
+                <div class="flex flex-wrap gap-1">${bandChips}</div>
             `;
-            
+
             if (hasAll) {
                 const btn = card.querySelector('.vi-compute-btn');
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    computeVI(vi);
-                });
+                btn.addEventListener('click', (e) => { e.stopPropagation(); computeVI(vi); });
                 card.addEventListener('click', () => computeVI(vi));
             }
-            
+
             container.appendChild(card);
         });
     }
@@ -1096,44 +1056,62 @@
 
             resultCtx.putImageData(resultData, 0, 0);
 
-            // Capture VI output as blob for session ZIP download
-            if (ds._isSession) {
-                resultCvs.toBlob(viBlob => {
-                    if (!viBlob) return;
-                    if (session.viBlobs[vi.id]?.objectUrl) URL.revokeObjectURL(session.viBlobs[vi.id].objectUrl);
-                    const viFilename = `vi_${vi.id}_${session.id}.png`;
-                    session.viBlobs[vi.id] = { blob: viBlob, filename: viFilename, objectUrl: URL.createObjectURL(viBlob) };
-                }, 'image/png');
+            // 3. Convert result canvas → Blob → ObjectURL → real layer in ds.layers
+            const viBlob = await new Promise(res => resultCvs.toBlob(res, 'image/png'));
+            if (!viBlob) throw new Error('Canvas toBlob failed');
+
+            // Revoke previous ObjectURL for this VI (if recomputed)
+            const existingIdx = ds.layers.findIndex(l => l._isVI && l._viId === vi.id);
+            if (existingIdx !== -1 && ds.layers[existingIdx]._objectUrl) {
+                URL.revokeObjectURL(ds.layers[existingIdx]._objectUrl);
+                ds.layers.splice(existingIdx, 1);
             }
 
-            // 3. Update State & UI
+            const viObjectUrl = URL.createObjectURL(viBlob);
+            const viFilename = `vi_${vi.id}_${state.datasetId}.png`;
+            const avg = validPixels > 0 ? (sum / validPixels).toFixed(3) : '0';
+
+            const viLayer = {
+                filename: viFilename,
+                description: `[VI] ${vi.name}`,
+                band: null,
+                _isVI: true,
+                _viId: vi.id,
+                _viDef: vi,
+                _objectUrl: viObjectUrl,
+                _blob: viBlob,
+                _stats: { avg, min: vi.min, max: vi.max, validPixels }
+            };
+            ds.layers.push(viLayer);
+            const viLayerIdx = ds.layers.length - 1;
+
+            // Keep track in session.viBlobs for ZIP download
+            if (ds._isSession) {
+                if (session.viBlobs[vi.id]?.objectUrl) URL.revokeObjectURL(session.viBlobs[vi.id].objectUrl);
+                session.viBlobs[vi.id] = { blob: viBlob, filename: viFilename, objectUrl: viObjectUrl };
+            }
+
+            // 4. Update State & UI
             state.viActive = vi;
-            
-            // Set canvas
-            const targetCanvas = $('#vi-overlay-canvas');
-            targetCanvas.width = width;
-            targetCanvas.height = height;
-            const tCtx = targetCanvas.getContext('2d');
-            tCtx.drawImage(resultCvs, 0, 0);
-            
-            // Re-render sidebar to include the Virtual Layer
+
+            // Re-render sidebar so new layer appears in dropdowns
             renderSidebar();
-            
-            // Auto switch Layer 1 to VI
-            state.layer1Idx = ds.layers.length;
-            
+
+            // Auto-select the VI layer as Layer 1
+            state.layer1Idx = viLayerIdx;
+            $('#layer-left').value = viLayerIdx;
+
             $('#vi-active-info').classList.remove('hidden');
             $('#vi-active-name').textContent = vi.name;
-            const avg = validPixels > 0 ? (sum / validPixels).toFixed(2) : 0;
-            $('#vi-active-stats').textContent = `Avg Value: ${avg} (Range: ${vi.min} to ${vi.max})`;
-            
+            $('#vi-active-stats').textContent = `Avg: ${avg}  (Range: ${vi.min} → ${vi.max})`;
+
             const legend = $('#vi-color-legend');
             legend.classList.remove('hidden');
             $('#vi-legend-title').textContent = vi.name;
             $('#vi-legend-max').textContent = vi.max;
             $('#vi-legend-mid').textContent = ((vi.max + vi.min) / 2).toFixed(1);
             $('#vi-legend-min').textContent = vi.min;
-            
+
             updateImages();
 
         } catch (err) {
@@ -1145,16 +1123,33 @@
     }
 
     function clearVI() {
+        const ds = state.currentDataset;
+        if (ds) {
+            // Revoke ObjectURLs and remove all VI layers from ds.layers
+            ds.layers = ds.layers.filter(l => {
+                if (l._isVI) {
+                    if (l._objectUrl) URL.revokeObjectURL(l._objectUrl);
+                    return false;
+                }
+                return true;
+            });
+        }
+        // Clear session viBlobs references (ObjectURLs already revoked above)
+        session.viBlobs = {};
+
         state.viActive = null;
         $('#vi-active-info').classList.add('hidden');
         $('#vi-overlay-canvas').classList.add('hidden');
         $('#vi-color-legend').classList.add('hidden');
-        renderSidebar(); // Removes virtual layer from dropdowns
-        
-        // Reset layer to 0 if it was the VI
-        const maxL = state.currentDataset.layers.length - 1;
-        if (state.layer1Idx > maxL) state.layer1Idx = 0;
-        if (state.layer2Idx > maxL) state.layer2Idx = 0;
+
+        // Clamp indices to remaining layers
+        if (ds) {
+            const maxL = ds.layers.length - 1;
+            if (state.layer1Idx > maxL) state.layer1Idx = Math.max(0, maxL);
+            if (state.layer2Idx > maxL) state.layer2Idx = Math.max(0, maxL);
+        }
+
+        renderSidebar(); // rebuild dropdowns without VI entries
         $('#layer-left').value = state.layer1Idx;
         $('#layer-right').value = state.layer2Idx;
         updateImages();
@@ -1382,24 +1377,25 @@
                 folder.file(lf.filename, lf.file);
             }
 
-            // 2. VI result PNGs (captured from canvas during computation)
-            for (const [viId, viData] of Object.entries(session.viBlobs)) {
-                folder.file(viData.filename, viData.blob);
+            // 2. VI result PNGs (from _blob on each VI layer in ds.layers)
+            const viLayers = ds.layers.filter(l => l._isVI && l._blob);
+            for (const vl of viLayers) {
+                folder.file(vl.filename, vl._blob);
             }
 
             // 3. Project JSON (compatible with the web-app format)
             const allLayers = [
-                ...ds.layers.map(l => ({
+                ...ds.layers.filter(l => !l._isVI).map(l => ({
                     filename: l.filename,
                     description: l.description,
                     band: l.band || null,
                     type: 'User Upload'
                 })),
-                ...Object.entries(session.viBlobs).map(([viId, v]) => ({
-                    filename: v.filename,
-                    description: `VI_${viId.toUpperCase()}`,
+                ...viLayers.map(vl => ({
+                    filename: vl.filename,
+                    description: vl.description,
                     band: null,
-                    type: `VI_${viId}`
+                    type: `VI_${vl._viId}`
                 }))
             ];
 
@@ -1510,10 +1506,6 @@
             state.alphaOpacity = parseInt(e.target.value);
             $('#alpha-value').textContent = state.alphaOpacity + '%';
             $('#alpha-img-top').style.opacity = state.alphaOpacity / 100;
-            // Also update canvas if VI is active on alpha top
-            if (state.viActive && state.layer1Idx === state.currentDataset.layers.length) {
-                $('#vi-overlay-canvas').style.opacity = state.alphaOpacity / 100;
-            }
         });
 
         // VI Section Toggles
