@@ -196,41 +196,46 @@
      */
     async function loadDatasetIndex() {
         console.log('[FieldSpectralView] Starting dataset discovery...');
-        
-        // Strategy 1: Try loading the curated index.json
+
+        // Step 1: Load pre-built summaries from index.json (optional, for cached info)
+        let indexDatasets = [];
         try {
             const res = await fetch('datasets/index.json');
             if (res.ok) {
                 const idx = await res.json();
-                if (idx.datasets && idx.datasets.length > 0) return idx;
+                if (Array.isArray(idx.datasets)) indexDatasets = idx.datasets;
             }
-        } catch (err) { 
-            console.warn('[FieldSpectralView] Strategy 1 failed', err);
+        } catch (err) {
+            console.warn('[FieldSpectralView] index.json not loaded', err);
         }
 
-        // Strategy 2: Try loading a manifest of project IDs
+        // Step 2: Always consult manifest.json for the authoritative project list
+        // This ensures projects added to manifest but not yet in index.json are shown
+        let manifestProjects = [];
         try {
             const res = await fetch('datasets/manifest.json');
             if (res.ok) {
                 const manifest = await res.json();
-                const datasets = [];
-                for (const projId of manifest.projects || []) {
-                    const info = await probeProject(projId);
-                    if (info) datasets.push(info);
-                }
-                if (datasets.length > 0) return { datasets };
+                if (Array.isArray(manifest.projects)) manifestProjects = manifest.projects;
             }
         } catch (err) {
-            console.warn('[FieldSpectralView] Strategy 2 failed', err);
+            console.warn('[FieldSpectralView] manifest.json not loaded', err);
         }
 
-        // If we reach here, no datasets were loaded.
-        // If on file:// protocol, show the security warning.
-        if (window.location.protocol === 'file:') {
+        // Step 3: Probe any manifest project not already in index.json
+        const indexIds = new Set(indexDatasets.map(d => d.id));
+        for (const projId of manifestProjects) {
+            if (!indexIds.has(projId)) {
+                const info = await probeProject(projId);
+                if (info) indexDatasets.push(info);
+            }
+        }
+
+        if (indexDatasets.length === 0 && window.location.protocol === 'file:') {
             showFileProtocolWarning();
         }
 
-        return { datasets: [] };
+        return { datasets: indexDatasets };
     }
 
     /**
@@ -563,18 +568,13 @@
             }
         }
 
-        // Update the compare left inner width
-        requestAnimationFrame(syncCompareLeftWidth);
     }
 
     // ===========================
     //  COMPARE SLIDER
     // ===========================
     function syncCompareLeftWidth() {
-        const container = $('#mode-compare');
-        if (!container) return;
-        const w = container.offsetWidth;
-        $('#compare-left-inner').style.width = w + 'px';
+        // No longer needed — compare-left-inner uses inset-0 and clip-path handles clipping
     }
 
     function onSliderMove(clientX) {
@@ -584,7 +584,7 @@
         x = Math.max(0, Math.min(x, rect.width));
         const pct = (x / rect.width) * 100;
         state.sliderPos = pct;
-        $('#compare-left').style.width = pct + '%';
+        $('#compare-left').style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
         $('#slider-handle').style.left = pct + '%';
         
         // Update canvas clipping if active
@@ -1283,8 +1283,8 @@
         $('#plot-x-label')?.addEventListener('change', updateChart);
         $('#plot-y-label')?.addEventListener('change', updateChart);
 
-        // Window resize
-        window.addEventListener('resize', syncCompareLeftWidth);
+        // Window resize (kept for future use)
+        window.addEventListener('resize', () => { /* reserved */ });
     }
 
     // ===========================
