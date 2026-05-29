@@ -165,6 +165,8 @@
                                     <select id="layer-right" class="flex-1 bg-[#1a1a1a] border border-gray-700 text-gray-300 text-xs p-1.5 rounded truncate"></select>
                                 </div>
                             </div>
+                            <!-- Band / nm table — one row per raw layer -->
+                            <div id="layer-band-list" class="mt-2 space-y-1"><!-- filled by JS --></div>
                         </div>
 
                         <!-- ============ VEGETATION INDICES ESTIMATION ============ -->
@@ -183,6 +185,16 @@
                                 <div id="vi-bands-list" class="flex flex-wrap gap-1">
                                     <!-- filled by JS -->
                                 </div>
+                            </div>
+
+                            <!-- Color Scale Range Selector -->
+                            <div id="vi-range-selector" class="hidden mb-3">
+                                <div class="flex items-center gap-1.5 bg-[#1a1a1a] rounded p-1.5 border border-gray-800">
+                                    <span class="text-[9px] text-gray-500 uppercase font-bold flex-1">Scala colori</span>
+                                    <button class="vi-range-btn text-[9px] px-2 py-0.5 rounded font-bold border transition-colors" data-range="full" title="Mostra tutto il range inclusi valori negativi (acqua, suolo nudo)">−1 → +1</button>
+                                    <button class="vi-range-btn text-[9px] px-2 py-0.5 rounded font-bold border transition-colors" data-range="positive" title="Mostra solo valori positivi (vegetazione)">0 → +1</button>
+                                </div>
+                                <p id="vi-range-hint" class="text-[8px] text-gray-600 mt-1 italic"></p>
                             </div>
 
                             <!-- VI Cards Container -->

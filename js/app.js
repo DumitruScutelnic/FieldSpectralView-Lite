@@ -27,7 +27,8 @@
         plotVisibleIds: [],       // measurement IDs visible in plot
         spectralChart: null,
         viActive: null,           // active VI object
-        viAvailableBands: []      // array of available bands
+        viAvailableBands: [],     // array of available bands
+        viRangeMode: 'full'       // 'full' = [vi.min, vi.max] | 'positive' = [0, vi.max]
     };
 
     const PLOT_COLORS = ['#047842', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -59,6 +60,8 @@
     //  VEGETATION INDICES (VIs)
     // ===========================
     const VI_DEFINITIONS = [
+        { id: 'falsecolor', name: 'False Color (CIR)', formula: 'R_out=NIR · G_out=RED · B_out=GREEN', bands: ['NIR', 'RED', 'GREEN'], desc: 'CIR composite: NIR (760–900+ nm)→canale Rosso, RED (600–700 nm)→canale Verde, GREEN (500–600 nm)→canale Blu. La vegetazione sana appare rossa/rosa; stress o suolo nudo appaiono in toni verdi/blu.', min: 0, max: 1 },
+        { id: 'truecolor', name: 'True Color (RGB)', formula: 'R_out=RED · G_out=GREEN · B_out=BLUE', bands: ['RED', 'GREEN', 'BLUE'], desc: 'Composita a colori naturali: ricombina le bande RED (600–700 nm) → canale R, GREEN (500–600 nm) → canale G, BLUE (400–500 nm) → canale B. Ricostruisce l\'aspetto visivo reale della scena dalla acquisizione multispettrale monocromatica.', min: 0, max: 1 },
         { id: 'ndvi', name: 'NDVI', formula: '(NIR - RED)/(NIR + RED)', bands: ['NIR', 'RED'], desc: 'Normalized Difference. Good for general plant health.', min: -1, max: 1 },
         { id: 'gndvi', name: 'GNDVI', formula: '(NIR - GREEN)/(NIR + GREEN)', bands: ['NIR', 'GREEN'], desc: 'Green NDVI. Sensitive to chlorophyll concentration.', min: -1, max: 1 },
         { id: 'sr', name: 'SR (RVI)', formula: 'NIR / RED', bands: ['NIR', 'RED'], desc: 'Simple Ratio. Correlates with biomass and LAI.', min: 0, max: 30 },
@@ -95,39 +98,50 @@
     }
 
     /**
-     * Parses a layer description string (from backend) and extracts
-     * a wavelength in nm, then maps it to a band.
+     * Parses a layer filename/description and maps it to a spectral band.
+     *
+     * Strategy: split on separators (_  .  -  space  /) to get clean tokens,
+     * then check each token for an exact band name or a 3-4 digit wavelength.
+     * This avoids false positives from long numeric IDs (e.g. "32966988").
+     *
      * Examples:
-     *   "685nm"                    → RED
-     *   "CALIB_FILTER_850"         → NIR
-     *   "FILTER_740"              → RE
-     *   "RGB"                     → RGB
+     *   "685nm"                         → RED   (token "685NM")
+     *   "registered_32966988_685nm"     → RED   (token "685NM"; "32966988" is 8 digits — skipped)
+     *   "FILTER_940"                    → NIR   (token "940")
+     *   "CALIB_FILTER_740"              → RE    (token "740")
+     *   "RGB"                           → RGB
+     *   "NIR"                           → NIR
+     *   "RED_EDGE"                      → RE    (full-string check before split)
      */
     function descriptionToBand(desc) {
         if (!desc) return null;
         const upper = desc.toUpperCase();
 
-        // Direct name matches
-        if (upper === 'RGB' || upper.includes('_RGB')) return 'RGB';
-        if (upper === 'NIR' || upper === 'INFRARED') return 'NIR';
-        if (upper === 'RED_EDGE' || upper === 'REDEDGE' || upper === 'RE') return 'RE';
+        // Full-string checks BEFORE splitting (handles multi-token band names)
+        if (/RED[_\s-]?EDGE/.test(upper) || upper.includes('REDEDGE')) return 'RE';
 
-        // Try to extract a numeric wavelength
-        // Patterns: "685nm", "FILTER_685", "CALIB_FILTER_685", "685"
-        const nmMatch = upper.match(/(\d{3,4})\s*(?:NM)?/);
-        if (nmMatch) {
-            const nm = parseInt(nmMatch[1]);
-            if (nm >= 300 && nm <= 1100) {
-                return wavelengthToBand(nm);
+        // Split on any run of separators
+        const tokens = upper.split(/[_.\s\-\/]+/);
+
+        for (const tok of tokens) {
+            // Exact band name tokens
+            if (tok === 'RGB')                         return 'RGB';
+            if (tok === 'NIR' || tok === 'INFRARED')   return 'NIR';
+            if (tok === 'RE')                          return 'RE';
+            if (tok === 'RED')                         return 'RED';
+            if (tok === 'GREEN')                       return 'GREEN';
+            if (tok === 'BLUE')                        return 'BLUE';
+
+            // Wavelength token: EXACTLY 3-4 digits, optional "NM" suffix
+            // Anchors (^ $) ensure we don't match sub-sequences of long IDs
+            const nmMatch = tok.match(/^(\d{3,4})(NM)?$/);
+            if (nmMatch) {
+                const nm = parseInt(nmMatch[1]);
+                if (nm >= 300 && nm <= 1100) return wavelengthToBand(nm);
             }
         }
 
-        // Fallback: check for color keywords
-        if (upper.includes('BLUE')) return 'BLUE';
-        if (upper.includes('GREEN')) return 'GREEN';
-        if (upper.includes('RED') && !upper.includes('INFRARED')) return 'RED';
-
-        return null; // Unknown band
+        return null; // unknown band
     }
 
     // ===========================
@@ -223,8 +237,9 @@
         // Step 1: Load pre-built summaries from index.json (optional, for cached info)
         let indexDatasets = [];
         try {
-            const res = await fetch('datasets/index.json');
-            if (res.ok) {
+            let res = await fetch('datasets/index.json');
+            if (!res.ok) res = await fetch('./datasets/index.json').catch(() => null);
+            if (res && res.ok) {
                 const idx = await res.json();
                 if (Array.isArray(idx.datasets)) indexDatasets = idx.datasets;
             }
@@ -236,8 +251,9 @@
         // This ensures projects added to manifest but not yet in index.json are shown
         let manifestProjects = [];
         try {
-            const res = await fetch('datasets/manifest.json');
-            if (res.ok) {
+            let res = await fetch('datasets/manifest.json');
+            if (!res.ok) res = await fetch('./datasets/manifest.json').catch(() => null);
+            if (res && res.ok) {
                 const manifest = await res.json();
                 if (Array.isArray(manifest.projects)) manifestProjects = manifest.projects;
             }
@@ -343,6 +359,10 @@
     // ===========================
     async function renderArchive() {
         const index = await loadDatasetIndex();
+        renderArchiveFromIndex(index);
+    }
+
+    function renderArchiveFromIndex(index) {
         const grid = $('#archive-grid');
         grid.innerHTML = '';
 
@@ -447,15 +467,37 @@
             <div class="flex justify-between items-center border-b border-gray-800 pb-1"><span class="text-gray-500">Sensor</span><span class="text-xs">${m.sensor || m.technique || '—'}</span></div>
             <div class="flex justify-between items-center"><span class="text-gray-500">Layers</span><span>${ds.layers.filter(l=>!l._isVI).length} <span class="text-gray-600 text-[9px]">${ds.layers.filter(l=>l._isVI).length ? '+ ' + ds.layers.filter(l=>l._isVI).length + ' VI' : ''}</span></span></div>`;
 
-        // Layer dropdowns (VI layers are real entries in ds.layers now)
+        // Layer dropdowns — include band + nm range in label
         const leftSel = $('#layer-left');
         const rightSel = $('#layer-right');
         leftSel.innerHTML = '';
         rightSel.innerHTML = '';
         ds.layers.forEach((l, i) => {
-            leftSel.innerHTML += `<option value="${i}"${i === state.layer1Idx ? ' selected' : ''}>${l.description}</option>`;
-            rightSel.innerHTML += `<option value="${i}"${i === state.layer2Idx ? ' selected' : ''}>${l.description}</option>`;
+            const bandKey = l.band?.toUpperCase();
+            const nmInfo = bandKey ? BAND_NM_INFO[bandKey] : null;
+            const nmSuffix = nmInfo ? `  [${bandKey} · ${nmInfo.range}]` : '';
+            const label = l._isVI ? l.description : `${l.description}${nmSuffix}`;
+            leftSel.innerHTML += `<option value="${i}"${i === state.layer1Idx ? ' selected' : ''}>${label}</option>`;
+            rightSel.innerHTML += `<option value="${i}"${i === state.layer2Idx ? ' selected' : ''}>${label}</option>`;
         });
+
+        // Band list table — one row per real layer showing band + nm
+        const layerBandList = $('#layer-band-list');
+        if (layerBandList) {
+            const realLayers = ds.layers.filter(l => !l._isVI);
+            layerBandList.innerHTML = realLayers.map(l => {
+                const bandKey = l.band?.toUpperCase();
+                const info = bandKey ? BAND_NM_INFO[bandKey] : null;
+                const color = info ? info.color : '#6b7280';
+                const nmText = info ? info.range : '—';
+                return `<div class="flex items-center gap-2 text-[10px] bg-[#1a1a1a] rounded px-2 py-1.5 border border-gray-800">
+                    <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 border" style="background:${color}30;border-color:${color}"></div>
+                    <span class="text-gray-300 flex-1 truncate">${l.description}</span>
+                    ${bandKey ? `<span class="font-bold text-[9px] font-mono flex-shrink-0" style="color:${color}">${bandKey}</span>` : '<span class="text-gray-600 text-[9px]">?</span>'}
+                    <span class="text-gray-500 font-mono text-[9px] flex-shrink-0 bg-gray-800/70 px-1 rounded">${nmText}</span>
+                </div>`;
+            }).join('');
+        }
 
         // Annotation count
         $('#annotation-count').textContent = `${ds.annotations.length} points`;
@@ -878,9 +920,27 @@
     // ===========================
     //  VEGETATION INDICES ENGINE
     // ===========================
+
+    function updateVIRangeUI() {
+        const hintEl = $('#vi-range-hint');
+        $$('.vi-range-btn').forEach(btn => {
+            const active = btn.dataset.range === state.viRangeMode;
+            btn.className = `vi-range-btn text-[9px] px-2 py-0.5 rounded font-bold border transition-colors ${
+                active ? 'bg-emerald-700 text-white border-emerald-600'
+                       : 'bg-[#252525] text-gray-400 border-gray-700 hover:border-gray-500 hover:text-white'}`;
+        });
+        if (hintEl) {
+            hintEl.textContent = state.viRangeMode === 'positive'
+                ? '0 → +1: scala ottimizzata per vegetazione (valori negativi → rosso)'
+                : '−1 → +1: scala completa — rosso=−1 (acqua/suolo), verde=+1 (vegetazione)';
+        }
+    }
+
     function renderVIPanel() {
         const ds = state.currentDataset;
         if (!ds) return;
+
+        updateVIRangeUI();
 
         // Parse available sub-bands from main bands (skip _isVI layers)
         const available = new Set();
@@ -940,8 +1000,19 @@
             `;
 
             const btn = card.querySelector('.vi-compute-btn');
-            btn.addEventListener('click', (e) => { e.stopPropagation(); computeVI(vi); });
-            card.addEventListener('click', () => computeVI(vi));
+
+            // Disable the whole card when required bands are not available
+            const allBandsPresent = vi.bands.every(b => available.has(b));
+            if (!allBandsPresent) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.textContent = 'Bande mancanti';
+                card.classList.remove('cursor-pointer', 'hover:border-emerald-600/50');
+                card.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+
+            btn.addEventListener('click', (e) => { e.stopPropagation(); if (!btn.disabled) computeVI(vi); });
+            card.addEventListener('click', () => { if (!btn.disabled) computeVI(vi); });
 
             container.appendChild(card);
         });
@@ -955,6 +1026,13 @@
         if (btn) btn.textContent = '...';
 
         try {
+            // Ensure required bands exist before attempting heavy compute
+            const availableSet = new Set(state.viAvailableBands || []);
+            const missing = vi.bands.filter(b => !availableSet.has(b));
+            if (missing.length > 0) {
+                alert('Cannot compute "' + vi.name + '" — missing bands: ' + missing.join(', '));
+                return;
+            }
             // 1. Load images into memory
             const bandImgs = {};
             for (const layer of ds.layers) {
@@ -1025,11 +1103,34 @@
                     }
                 });
 
-                // Calculate formula
+                // Calculate formula or special false-color composite
                 let val = 0;
                 const nir = vals.NIR || 0, r = vals.RED || vals.R || 0, g = vals.GREEN || vals.G || 0, b = vals.BLUE || vals.B || 0, re = vals.RE || 0;
                 
-                if (vi.id === 'ndvi') val = (nir + r) === 0 ? 0 : (nir - r) / (nir + r);
+                if (vi.id === 'falsecolor') {
+                    // CIR: NIR → R, RED → G, GREEN → B
+                    const Rv = Math.max(0, Math.min(1, nir));
+                    const Gv = Math.max(0, Math.min(1, r));
+                    const Bv = Math.max(0, Math.min(1, g));
+                    resultData.data[pxPtr] = Math.round(Rv * 255);
+                    resultData.data[pxPtr + 1] = Math.round(Gv * 255);
+                    resultData.data[pxPtr + 2] = Math.round(Bv * 255);
+                    resultData.data[pxPtr + 3] = (Rv === 0 && Gv === 0 && Bv === 0) ? 0 : 255;
+                    val = Rv; // NIR channel as proxy for the average
+                    if (!isNaN(val) && isFinite(val)) { sum += val; validPixels++; }
+                } else if (vi.id === 'truecolor') {
+                    // True Color: RED → R, GREEN → G, BLUE → B
+                    const Rv = Math.max(0, Math.min(1, r));
+                    const Gv = Math.max(0, Math.min(1, g));
+                    const Bv = Math.max(0, Math.min(1, b));
+                    resultData.data[pxPtr] = Math.round(Rv * 255);
+                    resultData.data[pxPtr + 1] = Math.round(Gv * 255);
+                    resultData.data[pxPtr + 2] = Math.round(Bv * 255);
+                    resultData.data[pxPtr + 3] = (Rv === 0 && Gv === 0 && Bv === 0) ? 0 : 255;
+                    val = (Rv + Gv + Bv) / 3; // luminance proxy
+                    if (!isNaN(val) && isFinite(val)) { sum += val; validPixels++; }
+                } else {
+                    if (vi.id === 'ndvi') val = (nir + r) === 0 ? 0 : (nir - r) / (nir + r);
                 else if (vi.id === 'gndvi') val = (nir + g) === 0 ? 0 : (nir - g) / (nir + g);
                 else if (vi.id === 'sr') val = r === 0 ? 0 : nir / r;
                 else if (vi.id === 'ndre') val = (nir + re) === 0 ? 0 : (nir - re) / (nir + re);
@@ -1044,18 +1145,18 @@
                     sum += val; validPixels++;
                 }
                 
-                // Color mapping
-                // Clamp value to expected min/max for color scale
-                const clampVal = Math.max(vi.min, Math.min(vi.max, val));
-                // Normalize to 0-1 for colormap
-                const normVal = (clampVal - vi.min) / (vi.max - vi.min);
+                // Color mapping — use effectiveMin based on user-selected range mode
+                const effectiveMin = (state.viRangeMode === 'positive' && vi.min < 0) ? 0 : vi.min;
+                const clampVal = Math.max(effectiveMin, Math.min(vi.max, val));
+                const normVal = (vi.max - effectiveMin) === 0 ? 0 : (clampVal - effectiveMin) / (vi.max - effectiveMin);
                 
                 // RdYlGn colormap logic
                 const [cr, cg, cb] = getHeatmapColor(normVal);
-                resultData.data[pxPtr] = cr;
-                resultData.data[pxPtr + 1] = cg;
-                resultData.data[pxPtr + 2] = cb;
-                resultData.data[pxPtr + 3] = val === 0 && (r===0 && nir===0) ? 0 : 255; // transparent if completely black source
+                    resultData.data[pxPtr] = cr;
+                    resultData.data[pxPtr + 1] = cg;
+                    resultData.data[pxPtr + 2] = cb;
+                    resultData.data[pxPtr + 3] = val === 0 && (r===0 && nir===0) ? 0 : 255; // transparent if completely black source
+                }
             }
 
             resultCtx.putImageData(resultData, 0, 0);
@@ -1107,14 +1208,26 @@
 
             $('#vi-active-info').classList.remove('hidden');
             $('#vi-active-name').textContent = vi.name;
-            $('#vi-active-stats').textContent = `Avg: ${avg}  (Range: ${vi.min} → ${vi.max})`;
+            if (vi.id === 'falsecolor') {
+                $('#vi-active-stats').textContent = `NIR medio: ${avg}  (NIR→R | RED→G | GREEN→B)`;
+            } else if (vi.id === 'truecolor') {
+                $('#vi-active-stats').textContent = `Luminanza media: ${avg}  (RED→R | GREEN→G | BLUE→B)`;
+            } else {
+                const dispMin = (state.viRangeMode === 'positive' && vi.min < 0) ? 0 : vi.min;
+                $('#vi-active-stats').textContent = `Avg: ${avg}  (Scala: ${dispMin} → ${vi.max})`;
+            }
 
             const legend = $('#vi-color-legend');
-            legend.classList.remove('hidden');
-            $('#vi-legend-title').textContent = vi.name;
-            $('#vi-legend-max').textContent = vi.max;
-            $('#vi-legend-mid').textContent = ((vi.max + vi.min) / 2).toFixed(1);
-            $('#vi-legend-min').textContent = vi.min;
+            if (vi.id === 'falsecolor' || vi.id === 'truecolor') {
+                legend.classList.add('hidden'); // compositi RGB — scala colori non applicabile
+            } else {
+                const dispMin = (state.viRangeMode === 'positive' && vi.min < 0) ? 0 : vi.min;
+                legend.classList.remove('hidden');
+                $('#vi-legend-title').textContent = vi.name;
+                $('#vi-legend-max').textContent = vi.max;
+                $('#vi-legend-mid').textContent = ((vi.max + dispMin) / 2).toFixed(1);
+                $('#vi-legend-min').textContent = dispMin;
+            }
 
             updateImages();
 
@@ -1234,9 +1347,11 @@
 
         _pendingFiles.forEach((pf, i) => {
             const band = descriptionToBand(pf.description);
+            const nmInfo = band ? BAND_NM_INFO[band] : null;
             const badgeClass = band
                 ? 'text-emerald-400 bg-emerald-900/30 border-emerald-700'
                 : 'text-gray-400 bg-gray-800 border-gray-700';
+            const badgeText = band ? `${band}  ${nmInfo?.range || ''}` : '?';
 
             const row = document.createElement('div');
             row.className = 'flex items-center gap-3 bg-[#1a1a1a] border border-gray-700 rounded p-2';
@@ -1249,7 +1364,7 @@
                     <div class="flex items-center gap-2 mt-1">
                         <input type="text" value="${pf.description}" placeholder="e.g. 685nm, NIR, RGB"
                             class="flex-1 bg-[#252525] border border-gray-700 text-gray-300 text-[11px] p-1 rounded focus:border-museum-accent focus:outline-none band-desc-input">
-                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 band-badge ${badgeClass}">${band || '?'}</span>
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 band-badge ${badgeClass}">${badgeText}</span>
                     </div>
                 </div>
                 <button class="text-gray-500 hover:text-red-400 flex-shrink-0 p-1 remove-file-btn">
@@ -1262,7 +1377,8 @@
                 const newBand = descriptionToBand(e.target.value);
                 _pendingFiles[i].band = newBand;
                 const badge = row.querySelector('.band-badge');
-                badge.textContent = newBand || '?';
+                const newNmInfo = newBand ? BAND_NM_INFO[newBand] : null;
+                badge.textContent = newBand ? `${newBand}  ${newNmInfo?.range || ''}` : '?';
                 badge.className = `text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 band-badge ${
                     newBand ? 'text-emerald-400 bg-emerald-900/30 border-emerald-700' : 'text-gray-400 bg-gray-800 border-gray-700'}`;
             });
@@ -1515,9 +1631,16 @@
         // VI Section Toggles
         $('#vi-section-toggle').addEventListener('click', () => {
             $('#vi-bands-available').classList.toggle('hidden');
+            $('#vi-range-selector').classList.toggle('hidden');
             $('#vi-cards-container').classList.toggle('hidden');
             $('#vi-toggle-icon').style.transform = $('#vi-cards-container').classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
         });
+
+        // VI Range Mode buttons
+        $$('.vi-range-btn').forEach(btn => btn.addEventListener('click', () => {
+            state.viRangeMode = btn.dataset.range;
+            updateVIRangeUI();
+        }));
 
         $('#vi-clear-btn').addEventListener('click', clearVI);
 
@@ -1661,6 +1784,7 @@
         bindEvents();
         initChart();
         setSidebarTab('layers');
+        showView('archive');
         await renderArchive();
 
         // Hide loading screen
